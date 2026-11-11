@@ -4,6 +4,13 @@ This project contains code ported from, and assets taken from, the following
 third-party projects. Each section names the original files, where they live
 in this tree, and the original licence, reproduced verbatim.
 
+Its packages also hold parts that are not in this tree, or that need more than
+a licence text. From rawler on, each section says what the part is, how it
+reaches the packages, where its source is, and where its licence text is.
+The licence of every Rust crate built into the app and the command-line tool,
+with its text, is in `THIRD-PARTY-LICENSES.md`, which a package holds beside
+this file in its `licenses` folder (the app's About card opens that folder).
+
 ## Pillow
 
 Ported from Pillow 12.2.0 (https://github.com/python-pillow/Pillow):
@@ -196,3 +203,98 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## imagehash
+
+The perceptual hashes (`crates/core/src/hash.rs`) follow the published method
+of Python's imagehash (https://github.com/JohannesBuchner/imagehash, by
+Johannes Buchner, under the BSD 2-Clause licence): its pHash
+and dHash, so that a distance between two hashes means here what it means
+there. No code is ported from it; the tests compare our hashes with the ones
+it computes (`crates/core/tests/hash_parity.rs`).
+
+## rawler
+
+RAW photos are decoded by rawler, a Rust crate of the dnglab project
+(https://github.com/dnglab/dnglab), built into the app and the command-line
+tool. rawler and its use are covered by the GNU Lesser General Public License,
+version 2.1. Its text ships beside this file as `LGPL-2.1.txt`, as the Free
+Software Foundation publishes it, and in `THIRD-PARTY-LICENSES.md` as rawler's
+own copy. The version built in is the one `Cargo.lock` pins.
+
+The LGPL lets you use a changed copy of rawler with Photostacker. Photostacker's
+complete source is public under the MIT licence, at
+https://github.com/riccardogabellone/photostacker, and builds with the
+commands its `AGENTS.md` documents, so the app can be rebuilt with your copy
+of rawler in place of the original (a `[patch.crates-io]` entry in
+`Cargo.toml` points cargo at it).
+
+## libheif and libde265
+
+HEIC and HEIF photos are decoded by libheif
+(https://github.com/strukturag/libheif), whose HEVC decoder is libde265
+(https://github.com/strukturag/libde265). Both libraries and their use are covered by the GNU Lesser General Public
+License, version 3 or (at your option) any later version. That licence is
+written as additions to the GNU General Public License, version 3, so both
+texts ship beside this file, as the Free Software Foundation publishes them:
+`LGPL-3.0.txt` and `GPL-3.0.txt`.
+
+How each reaches the packages:
+
+| Library | Linux | Windows | macOS |
+|---|---|---|---|
+| libheif | built into the app and the command-line tool, from the source the `libheif-sys` crate carries | built in, from vcpkg's `libheif` port with libde265 as its only codec (`libheif[core,libde265]`) | built in, from the source the `libheif-sys` crate carries |
+| libde265 | the system's shared library, `libde265.so.0`: the Debian package depends on it, and the AppImage carries a copy | built in, from vcpkg | built in |
+
+On Linux and macOS the libheif built in is the one the `libheif-sys` version
+in `Cargo.lock` carries (its version is the part after the `+`). libheif is
+built with libde265 as its only codec, so no codec under the GPL, such as x265
+or x264, is in the packages.
+
+The LGPL lets you use changed copies of these libraries with Photostacker. On
+Linux, libde265 is a shared library: put your copy in place of the system's
+`libde265.so.0` (or of the copy inside the AppImage), and the app loads it.
+Everywhere else they are built in: Photostacker's complete source is public
+under the MIT licence, at https://github.com/riccardogabellone/photostacker,
+and builds with the commands its `AGENTS.md` documents, so the app can be
+rebuilt with your copies in place of the originals.
+
+HEVC, the codec of HEIC photos, may be covered by patents in some countries:
+decoding it is the same grey area GIMP and ImageMagick ship with.
+
+## ONNX Runtime
+
+The visual check runs its model on Microsoft's ONNX Runtime
+(https://github.com/microsoft/onnxruntime), under the MIT licence. It is a
+shared library the package carries, unchanged: beside the executable on
+Windows, in `usr/lib/Photostacker` on Linux, in the app's `Frameworks` folder
+on macOS. The build each system gets is pinned in `scripts/onnxruntime.tsv`.
+Its own `LICENSE` and `ThirdPartyNotices.txt` ship beside this file as
+`onnxruntime-LICENSE.txt` and `onnxruntime-ThirdPartyNotices.txt`.
+
+## The Visual C++ runtime
+
+The Windows packages carry `msvcp140.dll`, `msvcp140_1.dll`,
+`vcruntime140.dll` and `vcruntime140_1.dll` beside the app, unchanged: the
+redistributable files of Microsoft's Visual C++ runtime, which ONNX Runtime
+and the app need. They remain Microsoft's, redistributed under the licence
+terms of Microsoft Visual Studio.
+
+## Material Symbols
+
+The icons inside the app's window are Google's Material Symbols
+(https://github.com/google/material-design-icons), under the Apache License
+2.0: the font `MaterialSymbolsRounded_Filled-Regular.ttf`, which the
+`egui_material_icons` crate embeds in the app. That crate is under the MIT
+licence (listed in `THIRD-PARTY-LICENSES.md`) and carries no licence file for
+the font. The Apache License 2.0's text is in `THIRD-PARTY-LICENSES.md`, and
+at https://www.apache.org/licenses/LICENSE-2.0.
+
+## The DINOv2 models
+
+The visual check's models, DINOv2 small and DINOv2 base, are Meta's DINOv2
+(https://github.com/facebookresearch/dinov2) as Xenova converted them to ONNX
+on Hugging Face, under the Apache License 2.0. They are not in the packages: the app or the command-line tool
+downloads one only when the user asks, from the addresses in the model
+registry (`crates/core/src/models/registry.rs`), or imports a file the user
+chooses.

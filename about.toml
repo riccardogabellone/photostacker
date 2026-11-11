@@ -1,0 +1,279 @@
+# cargo-about's configuration: `just licences` writes the licence of every
+# crate built into the shipped binaries, with its text, to
+# THIRD-PARTY-LICENSES.md (spec §11.3). What is not a crate (libheif, libde265,
+# ONNX Runtime, the fonts that are files of their own) is in
+# THIRD-PARTY-NOTICES.md.
+
+# The licences deny.toml allows, in the order a crate that offers a choice is
+# taken under: the first one its expression allows is the one whose text ships.
+# The LGPL is accepted crate by crate below: LGPL-2.1 for rawler, LGPL-3.0 for
+# the libheif that libheif-sys builds.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "MPL-2.0",
+    "BSL-1.0",
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
+    "CDLA-Permissive-2.0",
+]
+
+# The four targets the releases ship, as in deny.toml.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+]
+
+# Neither kind is built into a binary.
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+
+# The workspace's own crates are Photostacker itself, under its own LICENSE;
+# none is published (`publish = false`), so none is listed.
+private = { ignore = true }
+
+# chrono puts its two licence texts in one file; the tool's own clarification
+# splits them.
+workarounds = ["chrono"]
+
+# --- Crate by crate ---------------------------------------------------------
+#
+# Each clarification below names a licence file the crate ships that the tool
+# does not recognise with confidence, so that file's text, with its copyright
+# lines, ships instead of the licence's standard text. The checksum is the
+# file's SHA-256, byte for byte: a crate whose file changes no longer matches,
+# and the tool says so. Crates that ship no licence file at all get the
+# licence's standard text; the generated file says which.
+
+# The RAW decoder (spec §3): the one LGPL crate, as in deny.toml.
+[rawler]
+accepted = ["LGPL-2.1"]
+
+[rawler.clarify]
+license = "LGPL-2.1"
+
+[[rawler.clarify.files]]
+path = "LICENSE"
+checksum = "4bb33cc4cd956b56b779b501f18cae46a9e26f8c8500cca86ed758b8bc5e1788"
+
+# The crate is MIT, and it holds libheif's source (LGPL-3.0 or later), which
+# the build compiles into the binaries on Linux and macOS; the Windows build
+# links vcpkg's libheif instead, under the same licence. So the crate is listed
+# under both, with libheif's own COPYING (which also holds the GPL-3.0 the LGPL
+# builds on). deny.toml needs no entry: it reads only the declared MIT.
+[libheif-sys]
+accepted = ["LGPL-3.0-or-later"]
+
+[libheif-sys.clarify]
+license = "MIT AND LGPL-3.0-or-later"
+
+[[libheif-sys.clarify.files]]
+path = "LICENSE"
+license = "MIT"
+checksum = "7884c212eb49acf7c224e594e4c872d448a8703f6f3d3e640336ad5754dc2556"
+
+[[libheif-sys.clarify.files]]
+path = "vendor/libheif/COPYING"
+license = "LGPL-3.0-or-later"
+checksum = "fa81ce652315b013359d6e8e4744335f31a50c7c192907176d3632f78a3b4596"
+
+# Two zlib notices: the Rust port's and the original C code's.
+[adler32.clarify]
+license = "Zlib"
+
+[[adler32.clarify.files]]
+path = "LICENSE"
+checksum = "f5af8beef8f5f88f1b78494703bbfa019c4f3630ac111344390d6f9975ab22ed"
+
+[blake3.clarify]
+license = "CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception"
+
+[[blake3.clarify.files]]
+path = "LICENSE_A2"
+license = "Apache-2.0"
+checksum = "00fcc7a934ddbc9ece2a7cc063ac788e284b703b1d705ccbba72d462aa97921e"
+
+# Offered under BSD-3-Clause or MIT, it ships only the BSD-3-Clause text, so it
+# is taken under that one.
+[brotli-decompressor.clarify]
+license = "BSD-3-Clause"
+
+[[brotli-decompressor.clarify.files]]
+path = "LICENSE"
+checksum = "c0c56f26d9c051cac4d200c34c84e7ae9aaa853e01a982a1df08b09931e518ae"
+
+[constant_time_eq.clarify]
+license = "CC0-1.0 OR MIT-0 OR Apache-2.0"
+
+[[constant_time_eq.clarify.files]]
+path = "LICENSE-APACHE"
+license = "Apache-2.0"
+checksum = "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+
+# Apache-2.0 for the crate, MIT for the code it took from libm.
+[dpi.clarify]
+license = "Apache-2.0 AND MIT"
+
+[[dpi.clarify.files]]
+path = "LICENSE"
+license = "Apache-2.0"
+checksum = "6dc0e068dcf3a5bc8e054205b85b7720e1d49265bbc64bf515d2cf79197df69a"
+
+[[dpi.clarify.files]]
+path = "LICENSE-LIBM-MIT"
+license = "MIT"
+checksum = "9eff396a99bafd208e7126602420d6864f6066c08b84485a5b032320a9c01997"
+
+# MIT, with the notices of the musl code it derives from in the same file.
+[libm.clarify]
+license = "MIT"
+
+[[libm.clarify.files]]
+path = "LICENSE.txt"
+checksum = "3823dda7cf046602f4b4e77ec8e227863dc4736037cc85bb33d9f19febe16bb7"
+
+# Both notices in one file.
+[md5.clarify]
+license = "Apache-2.0 OR MIT"
+
+[[md5.clarify.files]]
+path = "LICENSE.md"
+license = "MIT"
+checksum = "2096783a9b939ae2a3a4789d9696740cec1a72ac04ccf8a7972d436fd0e7b240"
+
+[type-map.clarify]
+license = "MIT OR Apache-2.0"
+
+[[type-map.clarify.files]]
+path = "LICENSE-MIT"
+license = "MIT"
+checksum = "b47fb719a40d9ef9c8e3be525c41ce129c46d613cfc96a91bddd7c19dcebf7a1"
+
+# The windows crates name their licence files in lower case; every one of them
+# ships the same MIT text.
+[windows.clarify]
+license = "MIT OR Apache-2.0"
+
+[[windows.clarify.files]]
+path = "license-mit"
+license = "MIT"
+checksum = "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+
+[windows-collections.clarify]
+license = "MIT OR Apache-2.0"
+
+[[windows-collections.clarify.files]]
+path = "license-mit"
+license = "MIT"
+checksum = "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+
+[windows-core.clarify]
+license = "MIT OR Apache-2.0"
+
+[[windows-core.clarify.files]]
+path = "license-mit"
+license = "MIT"
+checksum = "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+
+[windows-future.clarify]
+license = "MIT OR Apache-2.0"
+
+[[windows-future.clarify.files]]
+path = "license-mit"
+license = "MIT"
+checksum = "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+
+[windows-implement.clarify]
+license = "MIT OR Apache-2.0"
+
+[[windows-implement.clarify.files]]
+path = "license-mit"
+license = "MIT"
+checksum = "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+
+[windows-interface.clarify]
+license = "MIT OR Apache-2.0"
+
+[[windows-interface.clarify.files]]
+path = "license-mit"
+license = "MIT"
+checksum = "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+
+[windows-link.clarify]
+license = "MIT OR Apache-2.0"
+
+[[windows-link.clarify.files]]
+path = "license-mit"
+license = "MIT"
+checksum = "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+
+[windows-numerics.clarify]
+license = "MIT OR Apache-2.0"
+
+[[windows-numerics.clarify.files]]
+path = "license-mit"
+license = "MIT"
+checksum = "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+
+[windows-result.clarify]
+license = "MIT OR Apache-2.0"
+
+[[windows-result.clarify.files]]
+path = "license-mit"
+license = "MIT"
+checksum = "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+
+[windows-strings.clarify]
+license = "MIT OR Apache-2.0"
+
+[[windows-strings.clarify.files]]
+path = "license-mit"
+license = "MIT"
+checksum = "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+
+[windows-sys.clarify]
+license = "MIT OR Apache-2.0"
+
+[[windows-sys.clarify.files]]
+path = "license-mit"
+license = "MIT"
+checksum = "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+
+[windows-targets.clarify]
+license = "MIT OR Apache-2.0"
+
+[[windows-targets.clarify.files]]
+path = "license-mit"
+license = "MIT"
+checksum = "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+
+[windows-threading.clarify]
+license = "MIT OR Apache-2.0"
+
+[[windows-threading.clarify.files]]
+path = "license-mit"
+license = "MIT"
+checksum = "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+
+[windows_x86_64_gnu.clarify]
+license = "MIT OR Apache-2.0"
+
+[[windows_x86_64_gnu.clarify.files]]
+path = "license-mit"
+license = "MIT"
+checksum = "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+
+[windows_x86_64_msvc.clarify]
+license = "MIT OR Apache-2.0"
+
+[[windows_x86_64_msvc.clarify.files]]
+path = "license-mit"
+license = "MIT"
+checksum = "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"

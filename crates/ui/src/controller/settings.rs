@@ -5,6 +5,8 @@
 //! few times, not once a frame. The window's size and the panels' are only handed here
 //! once they have settled (`App`). The models of Stage 3 are `controller::models`'.
 
+use std::path::Path;
+
 use photostacker_core::engine::JobId;
 use photostacker_core::models;
 use serde::Serialize;
@@ -78,6 +80,20 @@ impl Controller {
     pub fn open_logs(&mut self) {
         let logs = self.logs_dir.clone();
         self.reveal(&logs, Reveal::Folder);
+    }
+
+    /// The folder of the licence texts the package ships; `None` where there is none, as
+    /// in a development build.
+    pub fn licences_folder(&self) -> Option<&Path> {
+        self.licences_dir.as_deref()
+    }
+
+    /// Shows the folder of the package's licence texts in the file manager; nothing where
+    /// there is none. One gone since the start is a warning ("<path> does not exist.").
+    pub fn open_licences(&mut self) {
+        if let Some(licences) = self.licences_dir.clone() {
+            self.reveal(&licences, Reveal::Folder);
+        }
     }
 
     /// Saves `value` as the preference `key`, replacing a save of it still waiting.

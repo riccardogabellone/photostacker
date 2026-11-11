@@ -276,6 +276,12 @@ pub const SCREENS: &[Screen] = &[
         prepare: three_jobs,
         setup: settings,
     },
+    // Settings scrolled to their end: the About card, with the way to the licence texts.
+    Screen {
+        name: "about",
+        prepare: three_jobs,
+        setup: settings_at_the_end,
+    },
     // Settings with the visual check on: its default model being downloaded, held at
     // 43 %, the other one installed.
     Screen {
@@ -301,6 +307,9 @@ pub const SCREENS: &[Screen] = &[
 
 /// Where the screens say ONNX Runtime is, found or not.
 const RUNTIME_PATH: &str = "/opt/onnxruntime/lib/libonnxruntime.so";
+/// Where the screens say the package's licence texts are, as a Linux package has them: the
+/// screens show the app as a package does, with its way to them in the About card.
+const LICENCES_PATH: &str = "/usr/lib/Photostacker/licenses";
 /// Where the screens of a Mac say ONNX Runtime is: inside the app.
 const MAC_RUNTIME_PATH: &str =
     "/Applications/Photostacker.app/Contents/Frameworks/libonnxruntime.dylib";
@@ -447,6 +456,47 @@ fn settings(context: &egui::Context, mut controller: Controller) -> Box<dyn Scre
     controller.set_defaults(defaults);
     controller.open_settings();
     Box::new(App::new(context, controller))
+}
+
+/// The app with Settings open and scrolled to their end, the About card.
+fn settings_at_the_end(context: &egui::Context, mut controller: Controller) -> Box<dyn Screened> {
+    controller.open_settings();
+    Box::new(ScrolledDown {
+        app: App::new(context, controller),
+    })
+}
+
+/// The app with the mouse wheel turned down over the middle of the window every frame, so
+/// what scrolls there shows its end.
+struct ScrolledDown {
+    app: App,
+}
+
+impl eframe::App for ScrolledDown {
+    fn raw_input_hook(&mut self, _context: &egui::Context, raw_input: &mut egui::RawInput) {
+        let middle = raw_input
+            .screen_rect
+            .map_or(egui::pos2(680.0, 410.0), |screen| screen.center());
+        raw_input.events.push(egui::Event::PointerMoved(middle));
+        // Negative: the content moves up, showing what is below.
+        raw_input.events.push(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -400.0),
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Unknown,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        self.app.ui(ui, frame);
+    }
+}
+
+impl Screened for ScrolledDown {
+    fn ready(&self) -> bool {
+        self.app.ready()
+    }
 }
 
 /// The `writing` screen's folder: three Canon brackets of three, 20 s apart.
@@ -1203,6 +1253,7 @@ fn failed_start_database(context: &egui::Context, _controller: Controller) -> Bo
                 path: PathBuf::from(RUNTIME_PATH),
                 problem: None,
             },
+            licences: Some(PathBuf::from(LICENCES_PATH)),
         });
         match started {
             Ok(_) => Err("a controller started on a database that is a folder".into()),
@@ -1425,6 +1476,7 @@ pub fn start(screen: &Screen) -> Result<(TempDir, Prepared, Held, Waker), String
             path: PathBuf::from(RUNTIME_PATH),
             problem: None,
         }),
+        licences: Some(PathBuf::from(LICENCES_PATH)),
     })
     .map_err(|error| format!("the app cannot start: {error}"))?;
     // Declared after the controller, so an early return drops it first.

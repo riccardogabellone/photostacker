@@ -6,6 +6,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+# Shipped in the app's packages, not on crates.io; so cargo-about leaves it out of
+# the third-party licences (about.toml).
+publish = false
 
 [features]
 default = ["heic", "ml"]

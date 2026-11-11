@@ -835,6 +835,7 @@ mod tests {
                 path: PathBuf::from("/opt/onnxruntime/lib/libonnxruntime.so"),
                 problem: None,
             },
+            licences: None,
         })
         .unwrap()
     }

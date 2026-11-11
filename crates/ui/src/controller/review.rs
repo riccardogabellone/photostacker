@@ -1004,6 +1004,7 @@ mod tests {
                 path: PathBuf::from("/opt/onnxruntime/lib/libonnxruntime.so"),
                 problem: None,
             },
+            licences: None,
         })
         .unwrap();
         poll_until(&mut controller, |controller| controller.jobs_loaded());

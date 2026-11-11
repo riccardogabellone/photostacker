@@ -3699,6 +3699,52 @@ fn the_about_card_names_the_lgpl_components() {
     assert_eq!(*platform.revealed.lock().unwrap(), [logs_dirs.logs()]);
 }
 
+/// The About card's way to the licence texts a package ships.
+const OPEN_LICENCES: &str = "Open the licences folder";
+/// What the About card says above [`OPEN_LICENCES`].
+const LICENCES_SHIP: &str = "The licence texts of every part ship with the app.";
+
+#[test]
+fn the_about_card_opens_the_licences_folder_when_the_package_has_one() {
+    // A development build has no licences folder: the card says nothing of one.
+    let (_data, dirs) = data_dir();
+    let mut harness = harness(&dirs);
+    click(&mut harness, "Settings");
+    assert!(harness.query_by_label("Open the logs folder").is_some());
+    assert!(harness.query_by_label(OPEN_LICENCES).is_none());
+    assert!(harness.query_by_label(LICENCES_SHIP).is_none());
+    drop(harness);
+
+    // A package's: the sentence and the button, which shows that folder in the file
+    // manager, on the reveal's thread.
+    let licences = tempfile::tempdir().unwrap();
+    let platform = Arc::new(FakePlatform::default());
+    let (_package_data, package_dirs) = data_dir();
+    let mut harness = harness_with_options(&package_dirs, Arc::new(|| {}), |options| {
+        options.platform = platform.clone();
+        options.licences = Some(licences.path().to_path_buf());
+    });
+    click(&mut harness, "Settings");
+    assert!(harness.query_by_label(LICENCES_SHIP).is_some());
+    let button = harness.get_by_role_and_label(Role::Button, OPEN_LICENCES);
+    // Below the window's bottom edge, at the end of the cards: pressed as a screen
+    // reader does.
+    button.click_accesskit();
+    harness.step();
+    let deadline = Instant::now() + TIMEOUT;
+    while platform.revealed.lock().unwrap().is_empty() {
+        assert!(
+            Instant::now() < deadline,
+            "the licences folder was never shown"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(
+        *platform.revealed.lock().unwrap(),
+        [licences.path().to_path_buf()]
+    );
+}
+
 #[test]
 fn settings_render_at_the_smallest_window() {
     let (_data, dirs) = data_dir();

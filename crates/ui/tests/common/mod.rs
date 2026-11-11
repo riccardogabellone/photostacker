@@ -315,8 +315,8 @@ pub fn place_model(models_dir: &Path, spec: &ModelSpec) -> PathBuf {
     file
 }
 
-/// What a test's controller starts with: `dirs`, the stand-ins, ONNX Runtime found and no
-/// wake.
+/// What a test's controller starts with: `dirs`, the stand-ins, ONNX Runtime found, no
+/// folder of licence texts (a development build's) and no wake.
 pub fn options(dirs: &AppDirs) -> StartOptions {
     StartOptions {
         dirs: dirs.clone(),
@@ -325,6 +325,7 @@ pub fn options(dirs: &AppDirs) -> StartOptions {
         embedder: Some(Arc::new(StubEmbedder)),
         installer: None,
         runtime: runtime_found(),
+        licences: None,
     }
 }
 

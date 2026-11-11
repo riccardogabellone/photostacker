@@ -54,6 +54,10 @@ pub struct StartOptions {
     pub installer: Option<Arc<dyn ModelInstall>>,
     /// Where ONNX Runtime was looked for, and what keeps it from loading, if anything.
     pub runtime: RuntimeCheck,
+    /// The folder of the licence texts the package ships
+    /// ([`crate::platform::licences_folder`]), looked for before the first frame; `None`
+    /// where there is none, as in a development build: the About card then offers none.
+    pub licences: Option<PathBuf>,
 }
 
 /// Why the app cannot start.
@@ -218,6 +222,8 @@ pub struct Controller {
     thumbs_dir: PathBuf,
     /// The folder of the app's log files ([`AppDirs::logs`]).
     logs_dir: PathBuf,
+    /// The folder of the package's licence texts, if it has one.
+    licences_dir: Option<PathBuf>,
     jobs: Jobs,
     /// The selected job's review, once its analysis is saved.
     review: Option<Review>,
@@ -257,6 +263,7 @@ impl Controller {
             embedder,
             installer,
             runtime,
+            licences,
         } = options;
         let db = dirs.db();
         let io = |error| StartError::Io {
@@ -295,6 +302,7 @@ impl Controller {
             wake,
             thumbs_dir: dirs.thumbs(),
             logs_dir: dirs.logs(),
+            licences_dir: licences,
             jobs: Jobs::default(),
             review: None,
             pending_thresholds: HashMap::new(),
