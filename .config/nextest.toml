@@ -1,0 +1,11 @@
+# nextest configuration (https://nexte.st/docs/configuration/).
+
+# Tests that each hold several hundred MB run one at a time, so that two of
+# them never add up on a small machine: the large-TIFF decodes and the
+# writer's memory bound (whose VmHWM is per test process anyway).
+[test-groups]
+big-memory = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'test(mib_decodes) | (binary(write_scenarios) & test(=write_memory_stays_near_one_layer))'
+test-group = 'big-memory'

@@ -1,0 +1,72 @@
+[package]
+name = "photostacker-core"
+description = "Photostacker core: discovery, EXIF, hashing and grouping of photo stacks. No UI, no argv."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["heic", "ml"]
+# HEIC/HEIF decoding and EXIF through libheif (LGPL-3.0), built by cmake;
+# without it HEIC files are found but report "built without heic".
+heic = ["dep:libheif-rs"]
+# Stage 3's models: their download and import (`models::install`) and the
+# embedder on ONNX Runtime (`models::embed`); without it the registry still
+# lists them, and none can be downloaded, imported or run.
+ml = ["dep:sha2", "dep:ureq", "dep:ort"]
+
+[dependencies]
+blake3.workspace = true
+# The app data and cache folders (`appdirs`).
+directories.workspace = true
+# The engine's event stream to the UI or the CLI.
+crossbeam-channel.workspace = true
+# The ISO form of `ExifData::capture_time`, which the store persists.
+chrono = { workspace = true, features = ["serde"] }
+# ZIP-with-prediction layer channels of the writers.
+flate2.workspace = true
+# Only the still codecs; a missing codec fails at run time (Unsupported), not at compile time.
+image = { workspace = true, features = ["jpeg", "png", "tiff"] }
+libheif-rs = { workspace = true, features = ["embedded-libheif"], optional = true }
+# Runs the models of Stage 3 (`models::embed`).
+ort = { workspace = true, optional = true }
+# The per-file pool of `analyze`; rawler already depends on it.
+rayon.workspace = true
+# Camera RAW decoding (LGPL-2.1, the one LGPL dependency allowed besides libheif).
+rawler.workspace = true
+# The store (`store`): SQLite, its migrations, and sqlite-vec for the embeddings.
+# `fallible_uint`: u64 and usize columns, with a range check instead of a cast.
+rusqlite = { workspace = true, features = ["fallible_uint"] }
+rusqlite_migration.workspace = true
+serde = { workspace = true, features = ["derive"] }
+# The JSON columns of the store.
+serde_json.workspace = true
+sha2 = { workspace = true, optional = true }
+sqlite-vec.workspace = true
+thiserror.workspace = true
+# Warnings that fail nothing, such as a folder sync after a file is in place.
+tracing.workspace = true
+ureq = { workspace = true, optional = true }
+
+[dev-dependencies]
+# The errors of the Photoshop checkpoint example (examples/ps_samples.rs).
+anyhow.workspace = true
+photostacker-testkit.workspace = true
+psd.workspace = true
+tempfile.workspace = true
+tiff.workspace = true
+
+# The checkpoint example has unit tests of its folder guard; run them with
+# the workspace tests.
+[[example]]
+name = "ps_samples"
+test = true
+
+# The Stage-3 cosine calibration (spec §12.4); its unit tests run with the
+# workspace tests too.
+[[example]]
+name = "calibrate_ml"
+required-features = ["ml"]
+test = true

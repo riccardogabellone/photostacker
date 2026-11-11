@@ -1,0 +1,601 @@
+# Photostacker design specification
+
+Photostacker finds series of geometrically identical photos in a folder (exposure brackets, HDR sets, fast bursts) and stacks each series as layers in one PSD/PSB or layered TIFF. It is an offline, MIT-licensed desktop app and a command line, both built on one Rust core library. The code and the tests cite this document's sections as "spec §N".
+
+## 1. Intent
+
+Photostacker replaces a slow manual Photoshop routine. All logic and UI are in Rust; nothing else (no server, Docker, Python, Perl or exiftool) runs at run time. Machine learning is opt-in, and its weights are downloaded once from inside the app.
+
+**Success:** someone downloads a `.dmg`, `.msi` or `.AppImage`, drags a folder of brackets onto the window, reviews the proposed stacks, fixes mistakes by dragging photos between them, clicks Write, and gets PSD files that open cleanly in Photoshop. No terminal is involved.
+
+## 2. Goals, non-goals, anti-goals
+
+### Goals
+1. A Rust codebase. The only native code is SQLite, sqlite-vec, libheif (with libde265) and ONNX Runtime, compiled or linked in, or shipped inside the bundle (libde265 on Linux and macOS, ONNX Runtime everywhere, §8.3). Nothing is installed separately; the .deb declares `libde265-0`.
+2. A desktop app (egui) and a headless CLI on one core library.
+3. Fully offline. The only network use is the explicit, one-time, checksummed model download.
+4. Releases for Linux x86_64, Windows x86_64 and macOS Apple Silicon.
+
+### 2.1 Features
+- Resume after a crash or restart: jobs are checkpointed per file and per group, so nothing gets stranded.
+- Manual group editing in review: move, split, merge, remove, or pull a photo in from the "unstacked" tray.
+- Live threshold preview: the review's sliders regroup at once from cached hashes and embeddings.
+- Optional recursive scan, off by default; groups never cross folders.
+- Bulk confirm and reject, every threshold in the new-job form, live progress, per-job and per-file errors as toasts and inline.
+
+### Non-goals
+- An HTTP API, a web UI or Docker.
+- GPU inference (the design allows CoreML and DirectML later, §8.3).
+- Code signing and notarization: builds are unsigned.
+- Intel Macs and Linux ARM.
+- EmbeddingGemma 2 or any text search (§8.4).
+- 32-bit float HDR output and HDR merging: Photoshop merges, Photostacker stacks.
+
+### Anti-goals: these would make it a failure even if it "works"
+- Overwriting or deleting the user's photos, or silently overwriting an existing output file.
+- A file whose composite or preview does not match its layers, or a PSD that Photoshop warns about or refuses.
+- Holding every full-resolution image of a stack in memory at once.
+- Freezing the UI during work.
+- Any GPL dependency, or anything that forces the app off MIT.
+- A network call the user did not trigger, telemetry and update checks included.
+- A hidden runtime dependency ("please install exiftool / Python / VC++ redist").
+
+## 3. Product decisions
+
+| Topic | Decision |
+|---|---|
+| App shape | A Cargo workspace: `core` library, `cli` binary, `ui` egui app. The core's API is the API. |
+| EXIF / MakerNotes | Our own EXIF reader (§5.2) and our own MakerNote parser for the bracket tags of Canon, Nikon, Sony and Fujifilm. No exiftool, exiftool-rs (GPL), kamadak-exif or nom-exif. |
+| RAW | rawler (pure Rust, from dnglab, LGPL-2.1). |
+| HEIC/HEIF | libheif-rs with `embedded-libheif`. Its HEVC decoder libde265 comes from the build host: Windows links vcpkg's `libheif[core,libde265]` statically (never the `hevc`/x265 port); Linux links the system `libde265.so.0` (the .deb depends on `libde265-0`, the AppImage bundles it); macOS bundles the dylib. A test fails if x265 or x264 is linked. `scripts/win.ps1`, the Windows build for hand trials, builds without HEIC. |
+| Storage | One SQLite file (rusqlite, bundled) with sqlite-vec compiled in. |
+| ML | ort / ONNX Runtime, CPU only. DINOv2 from a registry: dinov2-small by default, dinov2-base optional (§8.1). |
+| Weights | Downloaded in the app, once, from Hugging Face at a pinned revision, with a GitHub Release fallback and a hard-coded SHA-256; "Import model file…" offline (§8.2). |
+| PSD / TIFF | Our own PSD/PSB encoder (§6.2); a Photoshop-layered TIFF, composite in the image data and layers in tag 37724, BigTIFF when large (§6.3). |
+| Platforms | Linux x86_64 (.deb, AppImage, built on Ubuntu 22.04), Windows x86_64 (NSIS .exe, .msi, zip), macOS arm64 (.dmg). Unsigned, with checksums and attestations. |
+| Grouping | Order-independent: in each EXIF/time bucket any two photos within the hash threshold link, and a group is a connected component (§5.3). Stage 3 splits groups that are not visually connected (§5.4). |
+| RAW tone | 16-bit sRGB by default (camera white balance, no auto-brightening); "Linear 16-bit (for HDR merging)" as the alternative. |
+| Layout | One window: toolbar, jobs list, the job in the centre, inspector, status bar (§9.2). |
+| RAW+JPEG pairs | Prefer the RAW, with a job setting to flip it (`raw_jpeg_preference: raw \| jpeg`, default `raw`); pairs by folder and stem; the other file is "paired with …" and never stacked (§5.1). |
+| Sliders vs review | A group keeps its decision while its member set is unchanged; when it changes, it goes back to `proposed` and is highlighted. Manual groups are never touched (§5.4.1). |
+| Camera brands | Canon, Nikon, Sony, Fujifilm, in that priority. |
+| Layer order | First shot on top, so shot 1 is the composite and the preview (§5.6). |
+| Output folder | `<input>/stacked` by default; the scan skips it; nothing is overwritten (§5.6). |
+| HEIC licensing | libheif and libde265 are LGPL-3.0, documented in THIRD-PARTY-LICENSES, the README and the About box, with named cargo-deny exceptions. HEVC-patent status is the same grey area GIMP and ImageMagick ship with. |
+
+Stage-2 hashes cannot match Python's `imagehash` bit for bit (decoders and resamplers differ); the commitment is near-parity on a committed corpus (§12.3), so imagehash's thresholds keep their meaning.
+
+## 4. Architecture
+
+### 4.1 Workspace
+- `crates/core` (`photostacker-core`, the library: everything that is not drawing or argv), `crates/cli` (`photostacker-cli`, binary `photostacker`), `crates/ui` (`photostacker-ui`, binary `Photostacker`, design in `crates/ui/DESIGN.md`), `crates/testkit` (dev-only fixtures, never published); `assets/`, `packaging/linux/` (the desktop entry, named after the app id), `scripts/`, `justfile`, `LICENSE` (MIT), `THIRD-PARTY-LICENSES.md`.
+- Edition 2024. `core` never depends on egui or clap.
+- Features: `ml` (ort and model management) and `heic` (so contributors can build without cmake), on by default in the core; the CLI and the app have the same two, forwarding to the core's.
+
+### 4.2 `core` modules
+`model` (domain types; `JobConfig::validate()` checks every parameter once), `discover`, `decode` (JPEG/PNG/TIFF via `image`, RAW via rawler, HEIC via libheif-rs), `exif`, `hash`, `group` (bucketing, union-find, bracket runs, Stage-3 split, canvas profile: pure functions over cached data), `models` (registry, download, ort session, embedding), `store` (SQLite and sqlite-vec), `thumbs`, `write` (PSD/PSB, layered TIFF, the shared layer encoder), `fsio` (output-folder check, atomic plan write, no-clobber `.partial` persistence, §5.6), `engine` (queue, worker, cancellation, checkpoints, resume, events).
+
+### 4.3 Concurrency model
+
+**Engine.** Owned by the UI's backend thread or the CLI's `main`. `Engine::start` takes the database's lock first (§7.2); a database another engine holds, in this process or another, is `EngineError::Busy`. One job at a time, FIFO, on a dedicated worker thread; per-file work on a rayon pool. No async runtime: model downloads use blocking `ureq` on the model's own thread.
+
+**Memory budget** (`crates/core/src/budget.rs`). Each analysis has a pool of min(cores, 16) threads and a 2 GiB budget (`DECODE_MEMORY_BUDGET`). Permits are taken before a step and given back right after it:
+- a thumbnail decode, its estimated peak (`thumbnail_peak`): JPEG, PNG, TIFF width × height × channels × bytes per sample × 3, from the header; HEIC width × height × 4 × 3, from libheif's handle; RAW 256 MiB plus the file's length (rawler holds the whole file); a HEIC in a build without `heic`, or an unreadable header, 256 MiB;
+- an EXIF read, active or passive (`exif_read_peak`): the file's length for a RAW or TIFF, else 0, given back before the thumbnail's permit is asked for, so a worker never holds two.
+- Permits are served in request order; one larger than the budget is clamped to it and runs alone.
+- Each worker takes files one after another from a shared counter in a rayon `broadcast` loop (not a `par_iter`), entered after a barrier of all the pool's threads, and waits for permits only there. So rawler's own `par_iter` on the same pool never finds a worker waiting for a permit with a decode on its stack. No other lock is held across a decode.
+
+**No user file is memory-mapped** (one truncated or removed while mapped kills the process: SIGBUS, or an in-page error on Windows). Whole-file reads instead: the EXIF of TIFF-family, RAF and CR3 files and the RAW preview walk (`exif::container::read_file`), each under its step's permit; rawler's source from bytes (`RawSource::new_from_shared_vec`; `clippy.toml` forbids `RawSource::new`; `memmap2` is no dependency); discovery's TIFF check reads only the header, the first IFD's entries and the start of Software. Every whole-file read is `budget::read_whole_file`, which refuses a file over 2 GiB before reading: its EXIF is unreadable (`ExifError::TooLarge`), and a RAW over 2 GiB fails its thumbnail, probe, decode and preview fallback as unsupported ("too large to decode"). A file changing while read gives bytes the bounds-checked readers reject. Not caught: a failed allocation (only `read_whole_file`'s buffer is fallible, as an I/O error) and a panic in an `extern "C"` callback (libheif's reader) abort the process.
+
+**Panics in a file's work** are caught (`panic = "unwind"`, pinned in the profiles) and never end the job: an active file gets `internal error while <step>: <message>`, a passive one contributes no EXIF. A panic while an active file's EXIF is read is therefore a file error, the one exception to §5.1. Each is logged at warn with path and step. Both apps install `photostacker_core::guard::install_panic_hook()` at start: it wraps the previous hook and logs a panic inside the core's guard at `debug` instead; other panics reach the old hook. A panic in rawler's parallel pieces on another rayon worker is quiet only when that worker is inside a guard; rayon hands it back to the file's guard either way. Writers decode on the caller's thread, so rawler's pieces then run on the global pool and their panics print; the same holds for the engine's thread.
+
+**Logging** (`tracing`; `RUST_LOG=photostacker_core=debug`): `debug` per file examined (path, kind, outcome) and per EXIF tag dropped as unparseable; `info` per stage and per stack written, skipped or failed; `warn` for a caught panic or a failed folder sync (§5.6).
+
+**Commands** are synchronous: `submit`, `cancel`, `delete`, `retry`, `write`, the review commands of §5.7, and the model commands below.
+- One writer connection behind a mutex, held briefly by the commands and the scan's exam cache; the queries (`jobs`, `job`, `groups`, `files`, `unstacked`, `analysis`, `review`, `pref`) use a read-only connection beside it (WAL).
+- `review(job)` returns a `ReviewView` (the job with its counts, its groups, its tray) read in one snapshot (§7.3).
+- `pref::<T>(key)` and `set_pref(key, &value)`: the app's preferences, one JSON value per key (`prefs`, §7.3), so the UI opens no store. `set_pref` sends no event; a stored value of another type is an error, not a missing preference.
+- Commands, and the worker settling a task, change a job's status under the queue's lock, so events come in the order of the changes. The exception: a task sets SCANNING or WRITING itself on its QUEUED job, which review commands do not act on and cancel and delete only flag.
+- A review edit holds the writer connection from its read of files, groups and pins to its write, and commits in one transaction.
+
+**Tasks** of the worker:
+- **scan:** SCANNING; `analyze_with` with the store as exam cache (§7.3); save the analysis; embeddings for the ambiguous groups when Stage 3 is available (§5.4); `group::regroup`; set `scan_done`; REVIEW_PENDING. With `auto_confirm` the groups are stored confirmed and the job is queued for its write.
+- **write:** WRITING; `write_groups` over the confirmed groups without `output_path`, in position order. Its observer records `partial_path` once the partial exists, and each outcome (WRITTEN with `output_path`, SKIPPED or FAILED with `error`, the warnings), clearing the partial. Then COMPLETED, or FAILED for an unusable output folder. A stack a stop interrupts is removed and its `partial_path` cleared.
+- **swap** (`swap_active`) and **embed** (§5.4): review edits that run on the worker. They never change their job's status, a cancel leaves them be, and their failures, panics included, are only reported.
+- A panic in a scan or write fails its job with `internal error: <message>`.
+
+**Models** (§8.2) go through the engine; the CLI's `models` commands call `models::install` directly.
+- `models()`: one `ModelView` per registry model, in order: spec, installed, activity (`Idle`, `Downloading { done, total }`, `Importing`, `Cancelling`), `disk_bytes` (everything in `models/<id>/`, the part included).
+- `download_model(id)` and `import_model(id, file)` run on a thread `photostacker-model-<id>` through `ModelInstall` (`models::install` with `ml`; `EngineOptions::installer` in tests); with neither, `built without ml`. `remove_model(id)` runs on the caller's thread under the model's busy state (failure: `cannot remove <id>: …`).
+- Refusals: `no model <id>`; `the model <id> is busy` for a download, import or removal of a model not idle; `the model <id> is not being downloaded` for `cancel_download`. None is refused because the worker stopped. `cancel_download` makes the model `Cancelling` until its thread ends; the part is kept. An import cannot be cancelled.
+- **A model installed is used at once:** Stage 3's source forgets it (a failed load too), the jobs whose Stage 3 failed on it this run are forgiven, and every REVIEW_PENDING job naming it is regrouped with its own thresholds by an edit that changes nothing else (skipped groups become pending, the embed task is queued). A job whose regrouping fails gets an `Error` (a panic: `internal error while regrouping with <id>: …`); the others go on. A scan whose model was unavailable checks again once its REVIEW_PENDING is stored, and regroups if the model is available now. A removal forgets the model and regroups nothing.
+- A panic while a model is put to use is the model's failure (`cannot download: internal error: …`, or `cannot import`); the model is idle again whatever happens.
+
+**A dying worker is reported.** A panic outside a task's guard ends the worker; its exit guard marks the queue stopped and sends `EngineStopped { message }` once. `Engine::is_running()` is then false, and `submit`, `retry`, `write` and `swap_active` return `EngineError::Stopped` (`the engine has stopped`). Cancel, delete, the review commands and the queries go on as far as they can; a running job keeps its status for the next start.
+
+**Events** (`EngineEvent` on a `crossbeam-channel`): `JobQueued`, `JobProgress{stage, done, total, current_file}`, `JobStatusChanged`, `FileFailed{job, path, message}`, `FilesChanged`, `GroupsChanged`, `Warning`, `Error`, `JobDeleted`, `EngineStopped`, `ModelDownloadProgress{model, done, total}`, `ModelChanged{model}`, `ModelFailed{model, message}`.
+- `ModelChanged` on every change of a model's view and after each removal. `ModelDownloadProgress` when the whole percent `done * 100 / total` passes the last one sent (at most 101 per download; the last has `done == total`).
+- `ModelFailed`, after its `ModelChanged`, for a failed download, import or removal. Its message never starts with the model's id: `cannot download: <reason>` (or `cannot import`, `cannot remove`). When every address of a download failed, the reason is `<host>: <reason>` per address, joined with "; " (`cannot download: huggingface.co: connection timed out; github.com: HTTP status 404`); the log keeps the whole error. A cancel is no failure. Model refusals never start with the id either, since the app shows them as capitalised sentences.
+- `FileFailed`: during a scan, once per file that ends the analysis with an error, with the error its `FileView::error` later shows; sent at the file's examination, or once its JPEG and HEIC partners were tried (§5.1). Never for a RAW that gives way, a passive file, or a file a stopped scan did not finish.
+- `FilesChanged` comes just before the `GroupsChanged` of an applied swap; an owner handles each as it arrives.
+- **Waking:** the owner's callback (the UI's `ctx.request_repaint`) is called once per event, after it, from an engine thread holding none of the engine's locks, so it may lock the owner's state. The exception is a model thread, which wakes under the read side of the models' `open` lock that the engine's drop takes: an owner must not drop the engine while holding a lock its callback takes. The callback returns quickly.
+
+**Cancellation:** a stop flag (`Arc<AtomicBool>`) per running task, checked between files and between layers, set by cancel, delete and quit (§5.7).
+
+**Shutdown** (`Engine::shutdown`, also on drop): it cancels every model download and closes the model threads out (they reach the engine only through a weak link, under a lock the shutdown takes), sets the quit flag and the running task's stop flag, and joins the worker. The task stops without changing its job's status: SCANNING and WRITING jobs resume at the next start (§7.3), queued ones stay QUEUED. No model thread sends an event or touches the store afterwards, and the database lock is released after the connections close.
+
+**The UI controller** (`crates/ui/src/controller/`) holds the view state, has no drawing code, is tested without a window, and never calls the engine itself.
+- **The backend thread** (`crates/ui/src/backend.rs`, `photostacker-ui-backend`) owns the `Engine` and runs requests in order: reads (`Jobs`, `Files`, `Review`, `Models`), `Submit`, `Thresholds`, `Run` (a command as a closure), `SavePref`. Sending never waits. Replies (`Jobs`, `Files`, `Review`, `Models`, `Submitted`, `Failed`, `ReviewUnreadable`) wait for the next frame, each followed by a wake; a successful command has none. A read of a deleted job (`UnknownJob`) is dropped. A panic in a request is its `Failed` (`internal error: <message>`). Each `Submit` carries a token and gets exactly one `Submitted` echoing it, a panicking one too, so the form matches answers by token.
+- **Coalescing:** an equal read already waiting is not queued again; a `Thresholds` replaces its job's waiting one, and a `SavePref` the waiting save of its key, in place. A running request no longer counts as waiting.
+- **Each frame** the controller takes the events, then the replies. `JobQueued`, `JobStatusChanged` and `JobDeleted` re-read the jobs. `JobProgress` and `FileFailed` are kept per job (the first 500 scan errors, the rest counted) until it leaves SCANNING or WRITING; an embed task's progress until that job's `GroupsChanged`, `Warning` or `Error`. `Warning`, `Error` and `EngineStopped` become notices. A failed request is an error notice, in plain words for `WrongState` and `UnknownGroup`, except `ReviewUnreadable` before the review is loaded, which is a banner with `Try again` (§9.2). A job that leaves the list is deselected.
+- **Start:** `main` installs the panic hooks, then the log (§7.1), then the controller, which creates the data folders, starts the engine (`Busy` becomes "already running"), reads the preferences, hands the engine to the backend thread and asks for the jobs, all before the window opens. **Drop:** the running request finishes, the waiting `SavePref`s run, other waiting requests are dropped, the backend thread is joined, and only then is the engine shut down.
+
+#### What a review edit costs
+`crates/core/tests/bench_review.rs` (ignored; `just test --run-ignored only -E 'test(bench_review)' --no-capture`) times the engine's commands on a job built in the store: brackets of 5, every group ambiguous, dinov2-small embeddings. Medians: a review edit (`set_thresholds`, `move_file`) takes 82–90 ms at 5,000 photos and 340–360 ms at 20,000, of which reading the embeddings 61 and 250 ms; `confirm` 0.02 ms; `files()` 13 and 58 ms. Without EXIF a folder is one bucket and regrouping is quadratic (840–890 ms an edit at 20,000).
+- Reads take one statement per table; a regrouping writes only what changed (§7.3).
+- vec0 reads a vector by opening its chunk of 1024 vectors: about 12 µs a vector, whatever the query's shape (point query, `rowid IN`, scan).
+- **One page cache for the process.** The bundled SQLite is built with `SQLITE_ENABLE_MEMORY_MANAGEMENT`: all connections share one pool, the sum of their `cache_size`s. A connection at its size takes the pool's oldest pages, whoever's; one below its size while the pool is full keeps none. vec0 walks a vector's chunk (384 pages of 4 KiB) from its start, so a starved writer makes an edit about 7 times slower. Hence the writer keeps SQLite's default 2,000 KiB (`WRITER_CACHE_KIB`), always full, so it takes the pages it needs, and the read-only connection gets 128 MiB (`READ_ONLY_CACHE_KIB`), which a review's reads never fill (it holds to about 200,000 photos). The benchmark's cold-review lines check both orderings in which a read could starve the writer: first grouping, one `files()`, then edits; and edits each after the reads of a redraw.
+- Pages are allocated only when read; the pool reaches about 135 MiB only past about 150,000 photos.
+- An edit of a large job takes a tenth of a second or more, so a UI calls the engine from a thread of its own.
+
+## 5. Pipeline
+
+### 5.1 Discovery
+- **Extensions:** `.jpg .jpeg .png .tif .tiff .heic .heif`, and RAW `.cr2 .cr3 .crw .nef .nrw .arw .srf .sr2 .raf .orf .rw2 .pef .dng .srw .x3f .3fr .iiq .erf .kdc .mrw .mos` (what rawler decodes; a test checks the lists agree).
+- **Content decides a still's codec.** Before a JPEG, PNG, TIFF or HEIC has its EXIF read or its image decoded, its first 32 bytes are sniffed: a JPEG, PNG, TIFF/BigTIFF or HEIF (`ftyp` with a HEIF brand) signature picks that kind (a JPEG named `.heic` is read as a JPEG); an unknown signature keeps the extension's kind. A RAW's kind is never overridden (TIFF-based RAWs start with the TIFF signature). A file that cannot be read for sniffing is an error when active and contributes no EXIF when passive.
+- **Folders:** top level by default. With `recursive`, subfolders too, and every bucket key includes the parent folder, so groups never cross folders.
+- **Skipped:** hidden files; our output folder when inside the input; our own layered TIFFs (a `.tif`/`.tiff` whose first IFD, classic or BigTIFF, has a Software tag starting with `Photostacker`, §6.3), silently. A file whose header or first IFD cannot be read is kept; decoding decides.
+- **Each file's row:** path, size, mtime and a fingerprint (`blake3` of size + mtime + first 64 KiB), which keeps resume and cache reuse safe when a file changes.
+- **RAW+JPEG pairing**, right after discovery:
+  - A RAW and a JPEG or HEIC with the same folder and file stem (case-insensitive) pair.
+  - **Google Pixel stems** (`PXL_….RAW-01.MP.COVER.jpg`, `PXL_….RAW-02.ORIGINAL.dng`): before comparing, a stem is cut at a case-insensitive `.RAW-` followed by two ASCII digits and then `.` or the stem's end, when the part before it is not empty. `a.RAW-x1`, `a.RAW-012` and `.RAW-01` stay whole.
+  - `raw_jpeg_preference` picks the *active* file; the other gets `paired_with = <active file id>` and is not hashed, grouped or written. The passive file's EXIF fills gaps in the active file's.
+  - **A RAW that cannot be decoded gives way.** An active RAW with a passive JPEG or HEIC partner is demoted when its examination fails in any way (no thumbnail, or a panic caught in its EXIF read, decode or hash) or when it was hashed only from its embedded preview (§5.3). Its JPEG and HEIC partners are then examined in a second parallel pass (same pool, same panic guard): kind, EXIF (the partner's own, its gaps filled from the RAW's and other partners', in id order), thumbnail, hashes. The first partner by id that hashes becomes active, with a `PromotedOverRaw` warning carrying the reason (the RAW's error, or rawler's error behind its preview); the RAW becomes its passive partner with no error and no `RawPreviewOnly`, so the plan lists it under `paired`; the RAW's other partners pair with the promoted file. If none hashes, the RAW keeps its error (or preview and `RawPreviewOnly`). A passive RAW is never promoted; an active JPEG or HEIC that fails is an error, without promotion of its RAW. The second pass ticks the `Hash` stage, whose total grows by the partners examined.
+  - **Unreadable EXIF is never a file error.** An active file gets `ExifUnreadable` and uses its passive partner's EXIF whole, or none; a passive file contributes nothing. A panic while an active file's EXIF is read is a file error (§4.3).
+  - The inspector shows the pair, and the user can swap the active file (§5.7).
+
+### 5.2 Stage 1: EXIF bucketing
+- **Read per file:** Make, Model, LensModel/LensID, FocalLength; DateTimeOriginal with SubSecTimeOriginal and OffsetTimeOriginal; ExposureTime, FNumber, ISO, ExposureBiasValue, ExposureMode (0xA402; 2 = auto bracket); Orientation (0x0112); ColorSpace (0xA001) and the Interop IFD's InteroperabilityIndex, used only for an untagged JPEG's profile (§5.5); the MakerNote bracket fields.
+- **MakerNote parser** (Canon, Nikon, Sony, Fujifilm), written clean-room from public tag documentation (ExifTool's tables may be consulted, no code copied): `bracket_mode` (off / AEB / other), `bracket_shot_number`, and `bracket_value` where recorded.
+  - Values meaning off (Canon `BracketMode = 0/Off`, a shot number of 0) mean not bracketing.
+  - Unknown makes and unparseable notes fall back silently to the standard tags.
+  - Canon and Fujifilm: full bracket fields. Nikon and Sony: only unencrypted fields (parts of Nikon ShotInfo and Sony's 0x9xxx tags are enciphered).
+  - Without vendor fields, bracketing is detected from `ExposureMode = 2`, an `ExposureBiasValue` sequence and the time window.
+- **The EXIF reader** (`crates/core/src/exif/`) finds the TIFF block itself, since MakerNote offsets need it: JPEG APP1 (also inside a RAF), the file for TIFF-family RAWs, the CMT boxes of a CR3, the HEIF `Exif` block through libheif. A tag whose value cannot be parsed (it points outside the block) leaves only its field empty; an unreadable container, TIFF header, IFD0 or ExifIFD (pointer or entry table) makes the file's EXIF unreadable (§5.1).
+- **Bucketing:**
+  - Files sort by capture time, then path. A file without EXIF time uses its mtime and gets `NoCaptureTime`.
+  - **mtime-placed files bucket apart:** an EXIF time without OffsetTimeOriginal is the camera's wall clock read as UTC, while an mtime is true UTC, so the clock is part of the camera key. Keys: `{folder}|{model}|{lens}|{focal}@{seq}` for EXIF time, `{folder}|{model}|{lens}|{focal}|mtime@{seq}` for mtime.
+  - Each camera key (folder, model, lens, focal length to 0.1 mm, clock) has at most one open bucket. A file joins it when its capture time is within `time_window_seconds` (**default 30**, range 1–60) of the **previous file of that bucket**, else it opens a new one; interleaved bodies stay apart. The default is 30 s because series are often shot 5 to 30 s apart, which a 4 s window leaves unstacked. Saved defaults keep the window they hold (`form_defaults`, §7.3); a job keeps its window, and its review can change it (§5.7, §9.2).
+  - A shot with bracket mode on closes the bucket when `bracket_shot_number` does not increase (reset, drop or repeat). A shot with mode off, or bracketed without a number, never closes it nor resets the last number: the next numbered shot compares with the last numbered one.
+  - **A repeated bracket value closes the bucket** for exposure-bracket shots without a shot number (Nikon; the ExposureMode 2 fallback; a Canon writing shot number 0, such as the 1D Mk IV). The open bucket keeps the values, rounded to hundredths of an EV, of its unnumbered exposure-bracket shots; such a shot whose finite value is already listed opens a new bucket whose list is its value, else it joins and adds it. So 0, −2, +2, 0, −2, +2 in the window make two buckets. Shots with mode off or other, or without a finite value, never close a bucket nor touch the list; numbered shots follow the shot-number rule and do not touch it. A new bucket, for any reason, starts its list afresh. Sony and Fujifilm notes record no value.
+  - Files with neither a model nor a capture time form one bucket per folder, with `NoCaptureTime`; Stage 2 alone decides for them.
+- Stage 1 never merges; it only bounds where Stage 2 links. Only shots with a shot number or a finite bracket value are kept to one sequence per bucket; exposure shots with neither never close a bucket, so one bucket can hold several of their sequences. That is why bracket runs (§5.3) take only numbered or valued shots.
+
+### 5.3 Stage 2: perceptual hashing
+- **Thumbnail:** upright, 512 px long side (DCT-scaled decoding allowed for JPEG).
+  - RAW: rawler's embedded preview (else its thumbnail) when its long side is at least 512 px; otherwise a develop with an adaptive binned demosaic (colour planes averaged over the largest cells that keep the long side at least 1024 px, one Bayer or X-Trans period on a smaller sensor), then rawler's white balance, camera matrix and sRGB curve (`crates/core/src/decode/raw/thumb.rs`).
+  - **Embedded-preview fallback** when rawler fails (an error or a caught panic, usually an unknown body): the largest JPEG our parser finds in the container that decodes. Candidates: the RAF header's JPEG, the CR3 `PRVW` box, or in the TIFF family the `JPEGInterchangeFormat` previews and single-JPEG strips (Compression 6 or 7) of IFD0, its `next` chain and their SubIFDs, sized from their SOF0/1/2 header (none: skipped), tried largest first. In the TIFF walk a bad pointer (outside the file, unreadable or looping) drops only its target; only an unreadable TIFF header or IFD0 is an error. The JPEG is shrunk, turned upright by the EXIF orientation, used even below 512 px, and the file gets `RawPreviewOnly` with rawler's error (unless a partner takes its place, §5.1). With no usable JPEG, rawler's error stands, followed by the fallback's own error when an embedded JPEG fails or the container cannot be parsed; probe and full decode do the same. An I/O error from rawler gets no fallback. rawler's own previews of bodies it knows carry no warning (`crates/core/src/decode/preview.rs`).
+  - **Review thumbnails** (`thumbs::write_thumbnail`): that thumbnail shrunk to a 256 px long side, never enlarged, same resampler, written atomically as a quality-85 JPEG named by the first 16 hex digits of the BLAKE3 hash of its key. One per file in `thumbs/<job>/`, keyed by the stored path: written with an active exam (recorded in `exams.thumb`), or, for a file promoted over its RAW, on every scan that promotes it. A cached exam whose thumbnail file is gone is a miss.
+  - **Decode limits:** thumbnail decodes share the 2 GiB budget (§4.3). JPEG, PNG and TIFF decode with `image`'s allocation limit at that budget (not its default 512 MiB): the image's bytes are reserved from 2 GiB and the decoder gets the rest. Refused as a per-file error before allocating: a still over 2 GiB decoded (about 358 MP of 16-bit RGB, 716 MP of 8-bit); a TIFF over about 1 GiB decoded (about 179 MP of 16-bit RGB; the decoder needs its own buffer); a single-strip uncompressed TIFF over about 683 MiB (about 119 MP of 16-bit RGB). See `open_decoder` (`crates/core/src/decode/mod.rs`) and `thumbnail_peak` (`crates/core/src/decode/peak.rs`).
+- **Hashes** match Python's `imagehash` on Pillow's resampling, 64 bits each:
+  - **pHash:** grayscale, 32×32 Lanczos, 2-D DCT-II, top-left 8×8, compared to the median.
+  - **dHash:** grayscale, 9×8 Lanczos, horizontal neighbours compared.
+  - **Two pairs per file:** the **plain** pair, stored and pinned by the golden tests (§12.3) but not used for grouping; and the **normalised** pair: the same grayscale, then Pillow's `ImageOps.equalize` (cumulative histogram, the last used level left out, scaled to 0–255; an image with one level, or fewer than 255 pixels outside its last level, unchanged), then the two hashes. Equalising maps an exposure bracket's shots onto nearly the same levels. Both pairs are set exactly when the file hashed.
+  - **Distance** = Hamming(pHash) + Hamming(dHash), 0–128, always over the normalised pairs, for linking and for a group's `max_distance`.
+  - **Threshold** `hamming_threshold`: default 8, range 0–40.
+- **Grouping:**
+  - In each bucket, link every pair with distance ≤ threshold and take the connected components (union-find), independently of order.
+  - **Bracket runs** also link, whatever the threshold: walking a bucket in its order (capture time, then path), consecutive hashed **run members** link when their distance is ≤ `BRACKET_RUN_MAX_DISTANCE` = 40. A run member is in an exposure bracket (MakerNote AEB or the ExposureMode 2 fallback) and records a shot number or a finite bracket value, so a run never spans two of §5.2's sequences. Other and unhashed members are skipped over. An exposure shot with neither links by the threshold alone: its bucket may hold several sequences, and 40 would admit a reframed shot (a 12 % reframe measures 39). Clipping puts a ±6 EV bracket's normalised distances up to 40, while frames of other scenes stay at least 48 away on the calibration sets ([calibration.md](calibration.md) § "Grouping").
+  - Single-photo components go to the job's *unstacked* tray.
+- Both pairs are stored, so regrouping is a pure function over the database; the live preview calls it.
+
+### 5.4 Stage 3: DINOv2 check (only when ML is enabled and a model is installed)
+- **When:** for each Stage-2 group of two or more photos whose maximum pairwise normalised distance (§5.3) is above `stage3_ambiguity_floor` (default 6). Bracket-run groups reach about 40, so every wide bracket is checked.
+- **Available** when the job names a model (`JobConfig.ml_model`) and the engine's source says it is available (`EmbedSource::available`: with `ml`, installed (§8.2) and loading (§8.3)). The engine loads each model once, on first use, and keeps it (or its failed load) until it quits or the model is installed or removed through it (§4.3). Unavailable (no feature, no model named or installed): ambiguous groups are `SKIPPED`, with no warning. Tests pass a stand-in, `EngineOptions::embedder`.
+- **Embeddings:** computed for the members of the `PENDING` groups that a regrouping reports, from each photo's 512 px upright thumbnail (§5.3), decoded again under the 2 GiB budget on a pool of their own with the analysis' loop (§4.3), 64 photos at a time, embedded in batches of 8 (§8.3), stored batch by batch (one `Embed` tick per photo) in sqlite-vec keyed by `(file_id, model_id)`, only after the analysis is saved, and kept until the job is deleted (§7.3). A scan groups once to learn which photos the ambiguous groups need, computes them, groups again, and only then sets `scan_done`.
+- **Failure:** a model that cannot be loaded or run, a wrong count or length, a non-finite value, or a photo that cannot be decoded again skips Stage 3 for the job for the rest of the engine's run, unless its model is installed through the engine meanwhile, which forgives the job (§4.3). Ambiguous groups are `SKIPPED`, and the job still reaches REVIEW_PENDING. The first failure is reported once per job: a `Warning` event and the stored `jobs.warning` (`JobView::warning`), both `the visual check was skipped: <error>` ("the visual check" is Stage 3's name for the user). A panic is such a failure (`internal error while embedding: …`, `… while loading: …`). The stored warning is cleared only when Stage 3's `prepare` runs for the job again (a scan, or an embed task); a forgiven job gets an embed task only when its regrouping leaves groups waiting for embeddings.
+- **Split rule:**
+  - Link members whose cosine is ≥ `cosine_threshold` (the job's, else the model's `default_cosine`: dinov2-base 0.85, dinov2-small 0.50, §12.4).
+  - **Bracket-run links (§5.3) are fixed edges**, whatever the cosine: the ends of a ±6 EV bracket can look unalike to DINOv2. A member linked only by its hash is still checked and can split off.
+  - Each connected component is a group. Status: one component `CONFIRMED`; several `SPLIT`, for each part of two or more photos; not ambiguous `NONE`; ML unavailable `SKIPPED`; a member without an embedding `PENDING`: the group stays whole, run links included, and its members without one are reported (`needs_embeddings`).
+  - **Score** = mean pairwise cosine of the members (each part's own after a split), shown as a badge; none for `NONE`, `SKIPPED`, `PENDING`.
+  - A component of one photo goes to the tray.
+- **Live preview:** any slider (hash distance, time window, similarity) regroups at once with the stored embeddings; the time window buckets again (§5.4.1). Groups whose members lack embeddings show "ML pending" while the engine computes them. Any review edit whose regrouping leaves `PENDING` groups (a slider, a move, a merge, a split, a swap) queues the job's **embed task**, unless one is queued. It regroups the job as it then is, computes what that waits for, regroups, stores, and sends `GroupsChanged`, as a review edit on the worker (§4.3). It regroups only a job still in REVIEW_PENDING; once a write is asked for (QUEUED, WRITING or later), it keeps the embeddings and leaves the groups be.
+
+#### 5.4.1 Regrouping and review decisions
+- **Inputs** of `group::regroup` (pure): the cached per-file data (EXIF facts, normalised hashes, embeddings), the thresholds with the time window, the **manual groups**, the photos **pinned** to the tray, and the existing automatic groups. Manual groups' members and pinned photos are removed from each Stage-1 bucket before linking, but the Stage-1 timeline includes them, so an edit never splits a bucket nor renumbers keys. Bracket runs walk only the remaining members, stepping over a removed shot. Manual groups are kept by the caller; pinned photos stay in the tray even when they would link.
+- **Steps:** Stage 1 buckets every hashed file; Stage 2 links what remains (§5.3); Stage 3 checks the groups above the floor (§5.4); layer order (§5.6); matching. The analysis runs the same function with Stage 3 off and nothing manual, pinned or existing.
+- **Output:** the automatic groups by bucket (bucket order), then by smallest file id; the tray (singletons, photos a split leaves alone, pinned photos); the files whose embeddings `PENDING` groups wait for; the ids of old groups to delete. Except the order within a bucket, which follows file ids, the result never depends on input order.
+- **Matching** new automatic groups with existing ones by **exact member set**:
+  - Same set: the row, its status (`proposed`, `confirmed`, `rejected`) and its `review_reset` flag are kept.
+  - No match: a new `proposed` group, flagged `review_reset` ("look again") if any member was, before this regrouping, in a confirmed or rejected group or in a flagged proposed one. A group replacing a flagged one inherits the flag, however many regroupings a drag runs, as long as each leaves some of those photos in a group.
+  - Limit: a decided or flagged stack whose members all fall to the tray in one regrouping loses its lineage (the tray keeps none), so a drag down and back up can propose it again without the cue.
+  - The flag lasts until the group is confirmed or rejected (alone or by the bulk actions). Manual groups never have it.
+  - Old groups with no match are deleted.
+- **Group ids** are stable for unchanged groups, so selection and inspector survive slider drags.
+- **Only `confirmed` groups are written.** The Write button shows how many will be written and how many are still proposed.
+
+### 5.5 Canvas profile (per confirmed group, at write time)
+- **Canvas** = the most common upright resolution; on a tie, that of the earliest member in layer order among the tied. Other resolutions are excluded with `ResolutionMismatch`, shown in the inspector. Every rule below looks only at kept members.
+- **Reference member:** the first kept in layer order; if it cannot be decoded at write time (§5.6), the first layer actually written.
+- **Bit depth:** 16-bit if any kept member is (RAW counts as 16-bit); 8-bit layers are widened with `v * 257`.
+- **Alpha:** if any kept member has alpha; the others get an opaque alpha.
+- **Colour:**
+  - The reference member's ICC profile is embedded.
+  - Only an RGB profile travels: `decode::probe` and `decode::full` keep one only when it is at least 128 bytes, its colour space (bytes 16..20) is `RGB ` and its class (bytes 12..16) is `mntr`, `scnr`, `prtr` or `spac`. Any other (a Gray or CMYK profile of a source decoded to RGB) is dropped silently, and the member counts as having none.
+  - **Untagged Adobe RGB JPEGs:** a DCF camera set to Adobe RGB embeds no profile but writes ColorSpace 0xFFFF with InteroperabilityIndex `R03` (tag 0x0001 of the Interop IFD, at ExifIFD tag 0xA005), or ColorSpace 2. A JPEG member with no RGB profile whose EXIF says either carries a generated profile (`crates/core/src/icc.rs`): v2.1 display, named "Photostacker Adobe RGB (1998)", D50 white, Bradford-adapted Adobe RGB (1998) primaries, gamma 563/256 (2.19921875) per channel. The writers pass it to `decode::probe` and `decode::full` as a `ColourHint` from the member's EXIF. Every other untagged member stays untagged (read as sRGB): a JPEG with ColorSpace 1, `R98` or no EXIF; an untagged PNG, TIFF or RAW-embedded JPEG whatever its EXIF; an nclx-only HEIC.
+  - Each other kept member whose profile differs byte for byte from the reference's (a missing one differs from a present one) gets `IccMismatch`, comparing the layers actually written with the profile actually embedded. Pixels are not converted.
+  - **A RAW layer** is rawler's full develop of the crop area, 16-bit RGB in sRGB primaries: demosaic, camera white balance, camera matrix, crop, and per `raw_tone` the sRGB curve (`srgb`, default) or none (`linear`). Nothing brightens it. It carries a generated v2.1 display profile with D50-adapted sRGB primaries, "Photostacker sRGB" or "Photostacker linear sRGB" (identity curves).
+  - A RAW whose develop cannot be probed (rawler's dummy header decode fails, or `developed_size` refuses it: unknown bodies, unsupported compressions, monochrome, SuperCCD, unsupported CFAs) falls back to its largest embedded JPEG at full size, 8-bit, with that JPEG's own profile (for a CR3, the 1620×1080 `PRVW`). Probe and full decode decide alike. A RAW that probes as a develop but then fails to decode is an error, never the JPEG.
+  - The probe reads the develop's size and profile from the headers; its profile depends on `raw_tone`, which `decode::probe` takes like `decode::full`. A develop peaks at about 30 bytes per pixel of the crop area (`crates/core/src/decode/raw/full.rs`).
+- **Decode limits:** a still's full decode has its thumbnail's limits (§5.3), so a still past them never reaches a stack. The writers decode one layer at a time and take no permit.
+- **Decided at probe time:** bit depth, alpha and container, from the kept members' probes. A member dropped at write time does not change them; only the reference member and its profile follow the layers written.
+- **Format limits:** estimated size = `width × height × channels × bytes_per_sample × (layers + 1)`, 3 channels plus one for alpha, 1 or 2 bytes per sample, the kept members as layers. A side over 30,000 px **or** an estimate over 2 GB (2,000,000,000 bytes) makes the PSD a **PSB** (`.psb`). A side over 30,000 px **or** an estimate over 4 GB (4,000,000,000 bytes) makes the TIFF a BigTIFF; a classic TIFF carries PSD-width layers, hence the side limit.
+
+### 5.6 Layer order, names and output naming
+- **Layer order:** by `bracket_shot_number` when present (unnumbered or non-bracketed shots after the numbered), then Stage-1 time (capture time, or mtime), then file name, then full path. **The first shot is the top layer.**
+- **Layer name:** the file stem plus the exposure when known (`IMG_0412 (−2 EV)`).
+  - The exposure is `value_ev` when the shot is in an exposure bracket (mode Exposure) and the camera recorded one; a recorded 0 counts (Canon AEBBracketValue and Nikon ExposureBracketValue give `0 EV` for the middle shot). Other brackets (white balance, flash, ISO, Active D-Lighting) never show their value. Otherwise the EXIF exposure bias when recorded and non-zero; otherwise no suffix. A non-finite value counts as unrecorded. `write::layer_exposure` gives the value, unrounded, for the inspector's range too (§9.2).
+  - Format: one decimal, a trailing `.0` trimmed, `+` for positive, U+2212 `−` for negative, after a space: `(+1 EV)`, `(0 EV)`, `(−0.7 EV)`; a value rounding to 0 is `0`.
+  - Each layer has a `luni` Unicode name; the Pascal name is the ASCII fallback (`−` as `-`, other non-ASCII as `?`, at most 255 bytes).
+- **Composite / merged image:** every layer is full-canvas, 100 % opacity, Normal, at (0,0), so the composite is the **top layer**, exactly what Photoshop shows wherever the top layer is opaque. On a canvas with alpha the PSD/PSB merged image is the top layer blended against white (§6.2); the layered TIFF's image keeps straight colour (§6.3). **Limit:** where layers are partly transparent, Photoshop's composite would also show the layers below; the merged image does not.
+- **Output folder:** chosen in the new-job form; default `<input>/stacked`.
+  - `JobConfig::validate()` rejects the input folder itself (compared canonicalised when both exist, else after resolving `.` and `..` lexically, so `<input>/missing/..` is the input) and an existing output that is not a directory.
+  - Before writing, the folder is created if missing and checked again on its canonical path (a symlink to the input made after validation is refused).
+  - **Subfolders:** a stack goes to the output folder joined with its first member's folder relative to the input, so a recursive run mirrors the input (`<input>/a` → `<output>/a`). Created one component at a time, each resolving, canonicalised, inside the output folder; otherwise the group fails with `the output subfolder <rel> leaves the output folder` before anything past it is created, and the next group is written. It is created before probing, so a skipped stack can leave it empty.
+- **Writing a stack** (`write_stack`; `write_group`, `write_groups` and `write_all` build its inputs):
+  - `write_groups` takes groups (file ids, top layer first) and a `WriteObserver`: `layer` as `write_all` ticks, `partial_created` once per stack after its three files exist and before any decode, `group_done` per group with outcome and warnings (not for a group a cancel interrupts). `write_all` is `write_groups` with a progress observer.
+  - Members are probed; a failed probe is `LayerUnreadable`, then the canvas profile (§5.5) drops other resolutions. Fewer than 2 kept: `Skipped`, nothing written.
+  - Kept members are decoded and encoded one at a time in layer order, each image moved into the encoder and freed before the next decode; groups are written one after another.
+  - A member whose full decode fails, or whose image disagrees with its probe or the canvas on size, depth, alpha or ICC profile, is left out with `LayerUnreadable`; so is one the encoder refuses before writing any of it. An encoder failure mid-layer fails the stack. Fewer than 2 layers written: skipped, partial and spill files removed.
+  - Every layer stem must be a file name: exactly one normal path component equal to the stem. Refused: empty, `.`, `..`, any platform separator (`/`, and `\` on Windows), and on Windows `:` (drive prefix `C:` or NTFS stream `a:b`); on Unix `\` and `:` are ordinary. A refused stem fails the stack with `InvalidInput` before anything is loaded or created.
+  - Progress is the `Write` stage: one tick per member, encoded or left out, across all groups of `write_all`, with the member as `current`; a failed group's remaining members are ticked, so `done` reaches `total` unless cancelled. A cancel is checked before each decode and each group.
+  - `write_all` checks the output folder once, before the first group, and fails only for an unusable folder or a cancel; any other group failure (I/O, full disk, read-only folder) is that group's outcome.
+- **File name:** `<first file stem>_<N>.psd|psb|tif`, the stem of the first layer written, N the layers written.
+  - **Never overwrite:** on a collision append `-1`, `-2`, … up to `-9999`; past that the stack fails.
+  - Writing goes to `name.ext.partial`, with spill files `name.ext.partial.layers` and `name.ext.partial.merged`; a crash never leaves a half file under the final name.
+  - The three files are opened under a provisional name, `<first kept stem>_<kept>.<ext>` or its `-k` form for the smallest k whose three files can all be created, all with `create_new`, so a crashed run's leftovers are never reused, overwritten or removed.
+  - On success the partial is synced, hard-linked to the final name (which fails if it exists), and removed; a taken name tries the next suffix with the same partial; on error or cancel the partial and spills are removed. The writers never remove or rename a file they did not create.
+  - Then the folder is synced: on Unix opened and `fsync`ed (`EINVAL` or unsupported counts as synced); nothing on Windows. A failed folder sync is logged as a warning and the stack still counts as written. The plan file's replacing write (§10) does the same after its rename.
+  - Without hard links the partial is renamed instead, after checking the final name is free. "No hard links" means the link failed with `Unsupported`; on Unix also `PermissionDenied` (EPERM, as Linux gives on FAT and exFAT); on Windows also `ERROR_INVALID_FUNCTION` (1) or `ERROR_NOT_SUPPORTED` (50). On Windows `PermissionDenied` (`ERROR_ACCESS_DENIED`) fails the write, as does every other link error (EIO, ENOSPC, EMLINK, …). The fallback's check and rename are not atomic, and `rename` replaces its target, so a file appearing between the two is replaced; only file systems without hard links are exposed.
+- **Predicting a stack** (`write::predict_stack`, for the inspector): from the members (file id, path, kind, EXIF) in layer order, the format and the RAW tone, each member's probe (upright resolution, 16-bit, alpha) or probe error, and the stack: canvas, depth, alpha, container, kept members, ICC mismatch and `<first kept stem>_<kept>.<ext>`. Members are probed exactly as the writer probes them (kind, orientation, `raw_tone`, `ColourHint`); failed probes are left out. No name with fewer than 2 kept members or a stem that is not a file name; no canvas with no member probed. The name is the writer's first try (a taken name gets `-1`; a failed full decode lowers the count). It reads headers only, takes no permit, never runs on the UI thread, and checks a stop flag before each probe; once set, there is no prediction.
+
+### 5.7 Job states
+`QUEUED → SCANNING → REVIEW_PENDING → WRITING → COMPLETED`, plus `FAILED` and `CANCELLED`. With `auto_confirm` review is skipped: `SCANNING → QUEUED → WRITING`, every group confirmed.
+
+- **Review commands** work only in `REVIEW_PENDING`:
+  - `confirm` and `reject` decide one group, proposed or decided (which flips it); `confirm_all` and `reject_all` decide every proposed group.
+  - `set_thresholds(hamming, time_window_seconds, cosine)` validates with the config's ranges (`JobConfig::validate_thresholds`, not the folders, so it works with the input drive unplugged), keeps them and regroups (§5.4.1); groups waiting for embeddings are `pending`, and the embed task computes them (§5.4).
+  - `move_file(file, to)` moves a hashed photo into another group, a new group, or the tray. The groups it leaves and joins become manual and proposed, without the flag. A manual group left with fewer than 2 photos dissolves into the tray. The tray pins a photo; leaving it unpins. A move to where it is changes nothing.
+  - `merge(groups)` makes one manual, proposed group of two or more, under the first one's id. `split(group, files)` makes a manual group of `files` and leaves the rest in `group`, made manual; both proposed, each keeping 2 photos or more.
+  - A group never holds photos of two folders; a move or merge that would is refused.
+  - Refusals use the product's words, shown as sentences: a group is a "stack" (named by its number on screen), a file a "photo" (by its path inside the job's folder), never an internal id: `a stack cannot hold photos of two folders`, `the photo b_3.jpg is not in stack 1`, `a merge needs 2 stacks or more`. A refusal never starts with a photo's name, which capitalising would misquote.
+  - `swap_active(file)` queues the swap of a passive file into its pair's active file: the worker examines it through the exam cache; if it hashes it takes its partner's place (in its group, with the decision, or pinned in the tray) and the job is regrouped, in one transaction; otherwise an error event: `the photo <path inside the job's folder> cannot be the active file of its pair: <error>`.
+- `write` queues a job in `REVIEW_PENDING`, or `CANCELLED` with its scan done: `QUEUED`, then `WRITING`. Confirmed groups without a stack are written, each ending `written`, `skipped` (fewer than 2 layers) or `failed`; one failure never stops the others. Then `COMPLETED`, or `FAILED` for an unusable output folder.
+- `cancel`: a running scan or write stops at its next check and becomes `CANCELLED`; one whose work was already done ends as it would have, except that an `auto_confirm` scan's write is not queued: the job becomes `CANCELLED` with its groups confirmed, for `write` or `retry`. A queued job is `CANCELLED` at once. Other jobs, and a swap of a job in review, are left be.
+- `delete` works in every state, cancelling first. It drops the job's queued tasks, removes its rows, thumbnails, embeddings and the unfinished files its writes recorded (each `partial_path` and its spill files, after §7.3's check; a failed removal is logged and left), and **never** touches inputs or outputs. A running job is deleted by the worker once its task stopped; others at once; `JobDeleted` follows. If the store fails to delete, a `QUEUED`, `SCANNING` or `WRITING` job becomes `CANCELLED` (best effort); others keep their state. The error is returned, or sent as an event for a running job.
+- `retry` queues a `FAILED`, `CANCELLED` or `COMPLETED` job again (`QUEUED`, error cleared).
+  - Without `scan_done` it is scanned again from its exam checkpoints (§7.3).
+  - With it, it is written: its **stranded** groups (write ended `failed`, or `skipped` with at least one `layer_unreadable` photo) go back to `confirmed`, error and warnings cleared, in the transaction that queues the job (`requeue_job`, §7.3); `GroupsChanged` follows `JobStatusChanged` when there were any. They are written with the other confirmed groups without a stack; a written stack is never written again. A stack skipped only for mixed resolutions is not stranded.
+  - A `COMPLETED` job with no stranded group is refused (`no stack of this job can be written again`); other states refuse a retry.
+- **Quitting** (`Engine::shutdown`) leaves a `SCANNING` or `WRITING` job as it is, for the next start to resume (§7.3); only a user cancel makes it `CANCELLED`.
+
+## 6. Writers
+
+### 6.1 Shared layer encoder
+- Takes layers (name and full-canvas 8- or 16-bit image) **one at a time**, reading each channel row by row from the interleaved samples at canvas depth (no planar copy).
+- Each layer is compressed per channel into the spill file `<final>.partial.layers`. The first layer is also written uncompressed and planar to `<final>.partial.merged`: blended against white for a PSD or PSB with alpha (§6.2), straight colour for a layered TIFF and for any canvas without alpha (§6.3). A writer refuses a spill made for the other kind (`InvalidInput`, before writing). The layer's buffer is freed before the next decode, so memory peaks at about one layer plus compression buffers.
+- **Compression:** PackBits (RLE) at 8 bits; at 16 bits ZIP with prediction by default (`Compression16::Zip`) or PackBits (`Compression16::Rle`) through `WriteOptions`. The ZIP default is provisional until Photoshop has opened the checkpoint set (§12.5). **Merged image data is always raw (uncompressed)**, for compatibility.
+- A transparency channel only when a source has alpha; otherwise RGB only.
+
+### 6.2 PSD / PSB
+- **Written:** header (version 1 PSD, 2 PSB); RGB at depth 8 or 16 with an empty colour-mode section; image resources: ICC profile, resolution info, version info with `hasRealMergedData = true`; layer and mask info from the spill files; raw merged image data. **Not written:** groups, masks, effects, text, adjustment layers. PSB uses 8-byte lengths where the format requires them.
+- Layer records and channel data are stored bottom layer first, the top layer last. Each record covers the canvas, Normal, opacity 255, flags 0, no mask, empty blending ranges, an ASCII Pascal name and a `luni` name.
+- 16-bit documents carry the layers in an `Lr16` block, with empty layer info.
+- With alpha the layer count is negative, marking the merged image's fourth channel as its transparency; without alpha positive.
+- **The merged image on a canvas with alpha is the top layer blended against white**, Photoshop's convention, which readers undo (GIMP's PSD loader: "Merged image data is blended against white. Unblend it.", whenever the count is negative; ImageMagick too). Each colour sample is `(c * a + max * (max - a) + max / 2) / max` in integer arithmetic wide enough for 16 bits (rounded to nearest; `max` 255 or 65535; `c` the top layer's colour at canvas depth, `a` the pixel's alpha): opaque stores the colour, transparent white. Alpha is stored unchanged, last. Layer channels keep straight colour and their own alpha; a canvas without alpha is untouched. Straight colour in the merged image would show dark fringes on soft edges in its readers.
+- A PSD larger than `i32::MAX` (2,147,483,647) bytes, Photoshop's 2 GB limit, is refused before writing (PackBits on noisy layers can exceed §5.5's estimate).
+- Padding follows Photoshop: the layer info and `luni` lengths count their padding to 4; the `Lr16` length is its data rounded up to even, the padding to 4 after it not counted.
+- Refused before writing: layers encoded with the other container's widths, and a merged spill not blended against white exactly when the canvas has alpha.
+
+### 6.3 Layered TIFF
+- **Image data:** the top layer, RGB at 8 or 16 bits, chunky, Adobe Deflate (8) with horizontal differencing (predictor 2), ICC profile in tag 34675, orientation applied (no Orientation tag). With alpha: RGBA with ExtraSamples 2 (unassociated), so straight colour, unlike the PSD's merged image; the `.merged` spill holds straight colour (§6.1).
+- **Software (305):** `Photostacker <version>`, ASCII, NUL-terminated; discovery skips such TIFFs (§5.1).
+- **Tag 37724 (ImageSourceData):** `"Adobe Photoshop Document Data Block\0"` (`"Adobe Photoshop Document Data V0002\0"` in a BigTIFF), then `8BIM`/`Layr` (or `Lr16` at 16 bits) with the PSD writer's layer info (one implementation), then an empty `8BIM`/`LMsk`.
+- **No tag 34377:** the resolution is X/YResolution (72 ppi); provisional until Photoshop has opened the checkpoint set (§12.5).
+- Our own writer (the `tiff` crate only reads back in tests), from the PSD writer's spill files.
+- **Layout:** big-endian (`MM`), since the layer blocks are the PSD writer's big-endian bytes and Photoshop writes ImageSourceData in the file's byte order (`8BIMLayr` in `MM`, `MIB8ryaL` in `II`). Classic TIFF 4-byte offsets; BigTIFF (`MM`, 43, offset size 8) 8-byte, with LONG8 StripOffsets and StripByteCounts. Strips first, then ImageSourceData, then other out-of-line values, then the one IFD; the header's IFD offset last; tags ascending; every out-of-line value and the IFD at an even offset.
+- **Strips:** as many rows as fit in 1 MiB (at least one, at most the height), read from `.merged` one read per plane and interleaved row by row; 16-bit samples big-endian; one zlib stream at level 1 per strip, stored raw when deflate would expand it.
+- **4 GiB guard:** an upper bound of the size (every strip at its stored size, plus padding) is computed first; a classic TIFF whose bound passes `u32::MAX` is refused.
+- **Layer blocks:** PSD widths in a classic TIFF; PSB widths in a BigTIFF (`Layr`, `Lr16`, `LMsk` with 8-byte lengths and the `V0002` signature, Photoshop's mark of PSB widths, which ExifTool also keys on). The block length is its data rounded up to even, the padding to 4 not counted; the count is negative with alpha (§6.2).
+- `write_tiff` refuses, before writing: a PSD or PSB canvas; a side past the container's layer widths (30,000 px classic, 300,000 BigTIFF); layers of the other container's widths; a merged spill blended for a PSD; an output not at its start.
+
+## 7. Persistence
+
+### 7.1 Location
+- **App data:** `directories::ProjectDirs("io.github", "riccardogabellone", "Photostacker")` (`AppDirs`, `crates/core/src/appdirs.rs`): `data_dir/photostacker.db`, `cache_dir/thumbs/`, `data_dir/models/`, `data_dir/logs/`. Per platform:
+
+  | Platform | `data_dir` | `cache_dir` |
+  |---|---|---|
+  | Linux | `$XDG_DATA_HOME/photostacker` (`~/.local/share/photostacker`) | `$XDG_CACHE_HOME/photostacker` (`~/.cache/photostacker`) |
+  | Windows | `%APPDATA%\riccardogabellone\Photostacker\data` | `%LOCALAPPDATA%\riccardogabellone\Photostacker\cache` |
+  | macOS | `~/Library/Application Support/io.github.riccardogabellone.Photostacker` | `~/Library/Caches/io.github.riccardogabellone.Photostacker` |
+
+- **`PHOTOSTACKER_DATA_DIR`**, set and not empty, replaces both: data in it, cache in its `cache` subfolder. Engine tests use `AppDirs::under(tempdir)`, CLI tests set the variable, so no test touches real data.
+- **The app's log** (`crates/ui/src/logging.rs`): `logs/photostacker.<date>.log`, a file a day (UTC date), the last 7 kept, written by `tracing-appender`'s own thread; a debug build also logs to stderr. Filter `RUST_LOG`, else `info,rawler=off` (an unreadable `RUST_LOG` falls back, and the log says so); the dependencies' `log` records are bridged. The first lines give the version, the data and logs folders, and whether the build has `ml` and `heic`. A panic outside the core's guard (§4.3) is logged at error with location and message before the wrapped hook prints it (a Windows release build has no console); a panic of rawler's parallel code during a write is logged so too, and the engine reports one failed stack. An unusable logs folder leaves the log on stderr; the app starts anyway.
+- **App ID:** `io.github.riccardogabellone.Photostacker`.
+
+### 7.2 SQLite
+- `rusqlite` with `bundled` and `fallible_uint` (`u64`, `usize` range-checked).
+- sqlite-vec registered once with `sqlite3_auto_extension`, before any connection, behind a `std::sync::Once`.
+- WAL (not in memory), `foreign_keys=ON`, `busy_timeout=5000` ms, `synchronous=NORMAL`, `cache_size` 2,000 KiB for the writer and 128 MiB for a read-only connection (§4.3, "What a review edit costs"). A file system that refuses WAL keeps its journal mode, with a logged warning.
+- **Migrations:** numbered SQL with `rusqlite_migration`, applied when the writer opens the database (`Store::open`); `user_version` is the number applied. A released migration is never edited. A read-only connection never migrates and refuses another version.
+- One writer connection (behind the engine's mutex, §4.3) and the engine's read-only connection; all writes go through the engine.
+- **Lock file:** `Engine::start` takes the OS's exclusive lock on `<db>.lock` (`photostacker.db.lock`) before opening the store, and releases it last, after the worker is joined and the connections closed. A database held by another engine, in this process or another, is `EngineError::Busy`, shown as `another Photostacker is using <db>`. The OS releases the lock when the process ends, crashed or not; the file stays (deleting it could let two processes lock two files of one name). A file system without locks is logged and counts as locked. The models' lock (§8.2) is the same on another file.
+
+### 7.3 Schema (`crates/core/src/store/schema.rs`, migrations 1 and 2)
+
+| Table | Contents |
+|---|---|
+| `jobs` | id, created_at (UTC ISO 8601 with milliseconds), status, scan_done, config_json (the validated `JobConfig`), error, warning (migration 2: why Stage 3 was skipped, §5.4) |
+| `job_skips` | job_id, path, reason: entries the scan could not read |
+| `exams` | job_id, role, path, fingerprint, format, result_json, thumb: the exam cache |
+| `files` | id, job_id, idx, path, kind, size, fingerprint, mtime_ms, exif_json, phash, dhash, nphash, ndhash (normalised), paired_with, error, warnings_json, thumb (reserved, not written), pinned |
+| `groups` | id, job_id, position, status, origin, review_reset, bucket, max_distance, ml_status, ml_score, partial_path, output_path, error |
+| `group_members` | group_id, file_idx, layer_index (0 = top) |
+| `group_warnings` | group_id, file_idx, warning_json: the last write's warnings |
+| `prefs` | key → JSON |
+| `embeddings_<model>` | sqlite-vec `vec0`, `float[dims]`, rowid = `files.id`; one per registered model (the dimension is per table), named `embeddings_` + the id with `-` as `_`: `embeddings_dinov2_small` (384), `embeddings_dinov2_base` (768) |
+
+- **Identities:** `files.idx` is the file's index in `Analysis::files`; every `file_idx` and `paired_with` is such an id. `files.id` only keys embeddings. Job, file and group ids are `AUTOINCREMENT`, never reused.
+- **Encodings:** paths are BLOBs of the platform's units (bytes on Unix; `encode_wide()` UTF-16 units as little-endian bytes on Windows), stored as given, never canonicalised (the writer compares with `config.input_dir` as spelled). 64-bit hashes are bit-cast to signed integers. `*_json` columns are serde_json text read only by the app. Enums (`status`, `origin`, `ml_status`, `kind`) are their pinned serde spellings (`review_pending`).
+- **No `models` table:** an installed model is its file in `models/<id>/` (§8.2).
+- **Preferences** (`crates/ui/src/prefs.rs`), read once at start, each key alone: a key unset or unreadable (another type included) is its default, logged, and never voids the others; missing fields take their defaults.
+
+  | Key | Value | Default |
+  |---|---|---|
+  | `theme` | `"system"`, `"light"` or `"dark"` | `"system"` |
+  | `window` | inner size in points at zoom 1, `[width, height]`, the last while neither maximised, minimised nor full screen | none: 1360 × 820 (never under 900 × 560) |
+  | `panels` | `{jobs, inspector, tray}` in points; `tray` `null` until resized | 260, 320, `null` (150, at most a third of the height shared with the stacks) |
+  | `form_defaults` | `output_format`, `recursive`, `auto_confirm`, `hamming_threshold`, `time_window_seconds`, `stage3_ambiguity_floor`, `cosine_threshold`, `raw_tone`, `raw_jpeg_preference` | `JobConfig::new`'s |
+  | `ml_enabled` | whether new jobs run Stage 3 | `false` |
+  | `ml_model` | the registry id Stage 3 uses | `"dinov2-small"` |
+  | `last_input_dir` | the last input folder picked | none |
+
+- **Exam cache:** one exam per (job, role, path) with its fingerprint and `format` (the result's version, `analyze::EXAM_FORMAT`, bumped when a cached exam would no longer equal a fresh one). A different fingerprint or format is a miss; the next put replaces the row.
+  - `analyze_with` looks up each passive file's EXIF (role `passive`) and each active file's examination (role `active`: EXIF, warnings, both hash pairs, or the error) first. A hit is neither read nor decoded, and still ticks.
+  - An active hit is taken only while its passive partners complete its EXIF into exactly the cached EXIF (orientation, and so the hashes, may come from them).
+  - Fresh exams are put before their tick, an active one with the thumbnail it was hashed from (at most 512 px), so a cancelled scan keeps its finished files.
+  - Failed exams are never put (an active file that did not hash, a passive file whose EXIF could not be read; a passive file with no EXIF is put), so a passing read error heals on resume or retry.
+  - §5.1's second pass is never cached; each promoted file hands its thumbnail to the cache's `thumbnail` method on every run that promotes it.
+  - A cache that cannot serve a hit (its thumbnail gone) misses. No cache method panics or fails the analysis.
+- **Store operations** (`crates/core/src/store/`), one transaction each where several rows are written:
+  - Multi-statement reads (an analysis; groups with members and warnings; a review: job, counts, groups, tray; a batch of embeddings) run in one read transaction, never torn by a concurrent commit.
+  - **Saving an analysis** stores files, warnings and skips, replacing a previous scan's files (with embeddings and pins), skips and groups. It happens once per job, before any embedding, never after `scan_done`. Loading returns groups by position and, as unstacked, hashed files in no group.
+  - **Applying a regrouping** deletes `removed`, updates groups that reuse an id, inserts new ones, stores manual groups (existing rows, members in layer order, status kept, no flag), rewrites positions (automatic in order, then manual), and writes only what changed: identical groups are left alone, a group whose row alone changed keeps its member rows.
+  - **Swapping a pair's active file** does what promotion does (§5.1): the passive file gets its active examination's EXIF, hashes and warnings; the old active file becomes passive with its own EXIF and no hashes, error or warnings; other partners pair with the new one.
+  - **A review edit** (`apply_review`) stores in one transaction the new config, a swap, the pins, the automatic groups (`removed` including manual groups dissolved or merged) and every manual group (updated, or inserted, with members in layer order, status, bucket and distance, no flag, no Stage-3 outcome).
+  - `set_group_outcome` sets status, `output_path`, `error`, warnings and clears `partial_path`. `requeue_groups` puts given groups back to `confirmed` with error and warnings cleared (a group of another job refuses all). `requeue_job` (every `retry`) makes the job `QUEUED`, error cleared, and requeues its stranded groups, in one transaction.
+  - **Deleting a job** removes its vectors first (`vec0` cannot cascade), then its row, which cascades.
+- **Checkpoints:** each examination is committed to `exams` as soon as it exists; `jobs.scan_done` marks the analysis and groups saved; status changes commit at once.
+- **Resume** (`crates/core/src/engine/resume.rs`): before accepting a command, `Engine::start` queues jobs again in id order, as `QUEUED` (the task sets `SCANNING` or `WRITING`). A job that fails to resume becomes `FAILED` with the error (and an event); only jobs that cannot be listed at all fail the start.
+  - `QUEUED` and `SCANNING` without `scan_done`: scanned, continuing from the checkpoints (fingerprints re-checked).
+  - `SCANNING` with `scan_done`: not scanned again; `REVIEW_PENDING`, or with `auto_confirm` its proposed groups confirmed and its write queued.
+  - `WRITING`, and `QUEUED` with `scan_done`: written.
+  - `REVIEW_PENDING`: reopens as left; with `PENDING` groups its embed task is queued. A queued swap is not kept. `COMPLETED`, `FAILED`, `CANCELLED` stay.
+  - **Leftovers:** every write task first removes, for each group with `partial_path` and no `output_path`, the regular files `<p>`, `<p>.layers`, `<p>.merged` (never a link or folder), clearing `partial_path` once all three are gone. An unusable output folder (`fsio::ensure_output_dir`) fails the job before any removal, records kept. A removal that fails (other than already gone) keeps the record and fails the job before writing.
+  - **Recorded paths are checked** first, by writes and `delete`: a partial whose name does not end in `.partial`, has a `..` component, or is not inside the job's output folder (by components, as spelled or canonical) is refused with a logged warning and its record forgotten.
+  - Only recorded paths are removed. A crash between persisting a file and recording `output_path` can leave a duplicate `-1` file, never a lost or overwritten one.
+
+## 8. Machine learning
+
+### 8.1 Model registry (compiled into the binary)
+Each entry: `id`, display name, licence; size in bytes and `sha256`; a Hugging Face URL at a **pinned commit** and a fallback on the project's GitHub Release `models-v1`; the input recipe (224×224, bicubic, no crop, ImageNet mean and std, CHW float32); the CLS token of `last_hidden_state` and its dimension; `default_cosine_threshold`.
+
+The registry exists with or without `ml`; without it a model can be listed and removed, not downloaded or imported. The `id` names the model's folder `models/<id>/`, its vec0 table (§7.3) and `JobConfig.ml_model`, which is `None` (Stage 3 off) or a registry id, checked by `JobConfig::validate()`; a config without the field reads as `None`.
+
+| id | revision | size (bytes) | sha256 | dims | default cosine |
+|---|---|---|---|---|---|
+| `dinov2-small` (default) | `c2bb04a51fab207c420665f1946016107bffc701` | 88459888 | `83141175ec78b4ff9a2bb58a4c7c264ba0054d1c2e122e5a8114b79a8d4179ea` | 384 | 0.50 (§12.4) |
+| `dinov2-base` | `d623d125a29e343851bcedff293fdc8b6bda292b` | 346555570 | `de9c675d214f0171285f90f1d1d7716bce1c5e280e93826d071d57f7b9314d98` | 768 | 0.85 |
+
+URLs: `https://huggingface.co/Xenova/<repo>/resolve/<revision>/onnx/model.onnx`, then `https://github.com/riccardogabellone/photostacker/releases/download/models-v1/<id>.onnx` (a 404 until that release exists, treated as a failed URL). Both are Apache-2.0: the `Xenova/dinov2-small` and `Xenova/dinov2-base` conversions declare `base_model: facebook/dinov2-small` (or `-base`), whose cards and the `facebookresearch/dinov2` repository are Apache-2.0.
+
+### 8.2 Download and installation
+- **Installed** = `models/<id>/model.onnx` exists with exactly the registry's size (no `models` table). The hash is checked when the file is put there.
+- ML is off until enabled in Settings; enabling downloads nothing. Downloading and importing need `ml`.
+- **Resumable** into `models/<id>/model.onnx.part`:
+  - Each URL in order, with `Range: bytes=<part length>-` (none for an empty part) and `User-Agent: photostacker/<version>`. 206 appends; 200 restarts from zero; any other status (416 included) or a failed request moves to the next URL.
+  - A connection dropped during the body is retried once on the same URL from the new length.
+  - No read (headers or body) waits over 15 s (`READ_IDLE_TIMEOUT`, ureq's `timeout_per_read`); a timeout is a drop, so a stalled server fails the download, keeping the part, and delays a cancel by 15 s at most. Connecting may take 30 s (`CONNECT_TIMEOUT`); name resolution has no limit of its own.
+  - Nothing past the registry's size is written; a part of that size is verified without a request; a wrong or longer part is deleted first.
+  - Progress is in bytes of the whole file. A cancel, seen before each request and between 64 KiB chunks, keeps the part.
+- **Verified:** SHA-256 of the whole part; a match is synced, renamed to `model.onnx`, the folder synced; a mismatch deletes the part and tries the next URL. When every URL fails, `ModelError::AllUrlsFailed` holds each URL with its reason; nothing is installed; the app shows hosts only (`ModelFailed`, §4.3).
+- **"Import model file…":** the file must match the registry entry it is imported as. Another size is refused at once, before locking or copying (`this file is <n> MB, <name> is <m> MB`, `ModelError::WrongSize`). Otherwise it is copied while hashed to `models/<id>/model.onnx.import` (never the `.part`); a different hash is refused (`… does not match <id>`). The copy is removed on every exit but the install, which renames it. The source is only read.
+- **Delete** removes `models/<id>/`, part included.
+- **One at a time:** downloads, imports and removals hold the OS's exclusive lock on `models/<id>/.lock` (released when the process ends; the file stays). A second one of the same model, in this or another process, is refused as busy and touches nothing. A removal holds it until the folder, lock file included, is gone.
+- **Proxy:** `ALL_PROXY`, `HTTPS_PROXY`, `HTTP_PROXY`, minus `NO_PROXY`. The tests' client ignores it.
+- **Through the engine** (§4.3) in the app: `ModelDownloadProgress` per whole percent, `ModelChanged` at start and end, `ModelFailed` on failure; a model installed is used at once, without a restart. The CLI's `models list|download|import|remove` (§10) call `models::install` directly.
+- The model is never bundled into installers.
+
+### 8.3 Inference
+- **Runtime:** `ort` 2.0.0-rc.15 (`std`, `load-dynamic`, `api-17`), CPU execution provider.
+  - Nothing links ONNX Runtime at build time; the embedder loads Microsoft's official ONNX Runtime **1.31.1** shared library (MIT) from `ORT_DYLIB_PATH` when set, else beside the executable: `libonnxruntime.so`, `onnxruntime.dll`, `libonnxruntime.dylib`. Every package ships it there with its `LICENSE` and `ThirdPartyNotices.txt`.
+  - ort's prebuilt static build needs glibc ≥ 2.38 and GCC 13's libstdc++, newer than the release host, Ubuntu 22.04; Microsoft's manylinux build runs there. The CLI has no ONNX Runtime entry in `ldd`; `dlopen` happens when a model is first loaded.
+  - Without the library, loading fails with an error ("ONNX Runtime not found at …", or the loader's reason), never a panic, and Stage 3 is skipped. The app and the CLI run without it. It is looked for once per run.
+  - Pinned SHA-256 of Microsoft's archives (`https://github.com/microsoft/onnxruntime/releases/download/v1.31.1/<archive>`):
+
+    | archive | sha256 |
+    |---|---|
+    | `onnxruntime-linux-x64-1.31.1.tgz` | `c849e36a1ef3e22d4ff217b9d1ce4a3cf5b9467b975610913ae959ad5b16bdc9` |
+    | `onnxruntime-win-x64-1.31.1.zip` | `5869e26bb25314375f2d5ef1877e3ea06b1543d6c710e6e4a1ec2f7177ab4b2c` |
+    | `onnxruntime-osx-arm64-1.31.1.tgz` | `2e1344a1926ee50eb25b38153cb6992c3567515aef0e677a1a520a1798896d6f` |
+
+  - `just ort` downloads the Linux archive once into a cache folder (`onnxruntime/1.31.1/`), checks it, extracts into a temporary folder and renames it into place; the justfile exports `ORT_DYLIB_PATH` to its `lib/libonnxruntime.so` unless already set. Model tests print `skipped: ONNX Runtime not found at …` and pass without it.
+  - One environment per process, made on first use, telemetry off.
+- **Session:** once per model, lazily, after the file's SHA-256 is checked, with ONNX Runtime's default intra-op threads (one per physical core). One batch at a time per model (`&mut`); preprocessing outside that lock. Batches of up to 8.
+- **Input/output:** resize to 224×224 (Catmull-Rom bicubic, no crop), scale to 0..1, ImageNet mean and std, CHW float32, into the first input. `last_hidden_state` must be `[batch, tokens, dims]` with the registry's `dims` (0 included), else the model is refused as the wrong shape. The embedding is the CLS row `[:, 0, :]`; a NaN or infinity in it fails the run like an ONNX Runtime error.
+- **Embeddings** are L2-normalised before storage; a zero vector stays zero.
+- **Failure** (corrupt model, ort error): `SKIPPED` with the warning `the visual check was skipped: <error>`, once per job (§5.4), until the engine restarts or the model is installed again through it (§4.3). A model that failed to load is not loaded again meanwhile; each job naming it gets its own warning.
+- The session builder sits behind one function, so CoreML or DirectML can be added behind a setting.
+
+### 8.4 EmbeddingGemma 2: deferred
+It matches by meaning, not geometry, so it would merge different shots of one scene, the false merge Stage 3 exists to prevent; its image path needs about 671 MB of vision encoder plus 1.08 GB of text tower; and nothing shows it on bracket detection. It may join the registry once the calibration harness (§12.4) shows it separates real bracket sets at least as well as dinov2-small; its natural use is text search across a library.
+
+## 9. UI (egui)
+
+The look (theme, typography, sizes, widgets) and each UI design choice are in [crates/ui/DESIGN.md](../crates/ui/DESIGN.md).
+
+### 9.1 Foundations
+- **eframe/egui 0.37**, `default-features = false`, with `accesskit`, `default_fonts`, `wayland`, `x11`, `clipboard` and the renderer: `glow` except on Windows, where wgpu draws (`crates/ui/src/renderer.rs`). `egui-notify` for toasts, `egui_material_icons`. One egui version in the tree.
+- Adapted from the author's `genetic_algo` (MIT): `theme.rs` (palette roles with `positive`, dark and light, the System/Light/Dark toggle, Inter with tabular digits, WCAG contrast tests); `widgets.rs` (icon_button, switch, card, readout, stat_tile, `chip`, `chip_button`, `icon_toggle`, `text_button`, `fitted`, each with accessibility labels); `identity.rs` (the name `Photostacker`, the app id `io.github.riccardogabellone.Photostacker` as Wayland app id, `.desktop` name, `Icon` and `StartupWMClass`, the binary `Photostacker`, the icon and logo); `renderer.rs`; `build.rs` (the Windows executable's icon); the `App::show(ui)` split that lets tests drive frames.
+- **Identity:** warm neutral greys and the logo's amber as the accent.
+- **Waking:** the engine's callback (§4.3) requests a repaint once the window's context exists, and does nothing before (`wake::Waker`).
+- **Window:** 1360 × 820, at least 900 × 560; Windows release builds open no console.
+- **Pickers:** `rfd`. A picker gives a path, a cancel, or nothing because there is no dialog: on Linux rfd tries the XDG desktop portal, then `zenity`, and with neither returns as for a cancel, so an answer within 200 ms counts as no dialog. A cancel says nothing; no dialog is a warning to type the folder's path (or, for an import, that no file can be chosen here).
+- **Dropping** a folder opens the form pre-filled with the first folder dropped (a file stands for its folder); with more, the notice "Only the first folder was used: one job scans one folder."
+- **Reveal in file manager** (outputs, job folders) via `opener`, without the Windows verbatim prefix (`\\?\C:\x` as `C:\x`, `\\?\UNC\server\share\x` as `\\server\share\x`).
+- **Thumbnails** load lazily from the disk cache, off the UI thread, into an LRU of egui textures; only visible cards are uploaded.
+
+### 9.2 Layout
+A toolbar on top, the jobs list on the left, the job in the centre, the inspector on the right, a status bar. From 900 px wide the centre keeps 400 px; the jobs list (200–400 px) and the inspector (260 px to 40 % of the window) give way first.
+
+- **Toolbar:** New job, Settings, the theme toggle, and the ML chip, a button named by its text: `ML off`, `ML ready`, `ML 43 %` (the active model's download), `ML: no model` (on, the model not installed), `ML unavailable` (no ONNX Runtime, or no `ml`). A click opens Settings at the visual check; the status bar repeats the words. ONNX Runtime's place (§8.3) is checked once, before the first frame.
+- **Jobs list:** status, a progress bar while running, open output folder, retry, cancel, delete (confirmed). While a delete runs the row says `Deleting…`, its actions are off and no command on it is sent.
+
+**Centre**
+- *New job form:* input and output folders, recursive; format (PSD/TIFF), auto-confirm; hash threshold, time window, ML ambiguity floor, cosine threshold, RAW tone, RAW+JPEG preference. A new job names the active model while the visual check is on and can run, installed or not (it is regrouped once installed, §8.2), and none while it is off, without ONNX Runtime or without `ml`; one sentence says which. Fields are validated by `JobConfig::validate()`, errors inline in the form's words ("This is not a folder: <path>", "The output folder must not be the photo folder.", "Choose a value from 0 to 40."), never the engine's (`input`, `directory`).
+- *Scanning:* stage, done/total, current file, cancel; per-file errors as they come.
+- *Review:*
+  - **Rows** of 136 px, one per group, only those on screen laid out (a job of thousands of groups costs only those); a row never wraps nor grows. First line: `Stack <n>`, photo count, status chip, `manual`, `look again` (`review_reset`), the ML badge (`ML 0.81` kept whole, `ML split 0.64` a part split off, `ML skipped`, `ML pending` with a spinner), the warning icon with the count of members' and write warnings (`<file>: <warning>` each on hover), and `Confirm stack <n>` / `Reject stack <n>`, the decision's one filled. A short line drops whole facts, least needed first (count, `manual`, badge, `look again`, warnings); number and status stay. Below, 96 px thumbnails, top layer first, unstretched, then `+<k>` (named `<k> more photos`), shown selected while the selected photo is among them.
+  - **Selection**, the UI's own, kept across regroupings that keep its groups (§5.4.1): a click selects a row's group alone, Ctrl+click (Cmd on macOS) adds it as primary or removes it; a thumbnail selects its photo and its group, and a Ctrl+click on one acts on its group. The primary group has a 2 px accent outline, the others 1 px, the selected photo an accent outline.
+  - **Sliders:** hash distance, time window (1–60 s), similarity; each change regroups (§5.4). Without a model in the job, similarity is off ("no model"); with one it shows the job's value or the model's, and `Model default` resets it.
+  - **The bar**, always in sight: Confirm all, Reject all, and `Write <n> stacks` with the count still proposed. A write ends the review (§5.7), so with groups still proposed it asks "Write <n> stacks now? <m> stacks are still proposed and will not be written. The review of this job ends with the write.", with `Keep reviewing` (the cautious answer, Esc's) and `Write <n> stacks`; with none proposed it writes at once; a job written without review never asks. At 0 it is disabled, with the hover "Confirm a stack of two or more photos first."
+  - **No group:** "No stack was found in <n> photos.", the unstacked count, and "Only photos shot within <s> s of each other are compared: try a longer time window." (no advice at 60 s), <s> the slider's window. No photo: "No photo was found in this folder.", and without recursion "Its subfolders were not looked at: turn on Scan subfolders in a new job."
+  - Until the review is loaded the centre says so; a failed read shows "The review cannot be read: <reason>." with `Try again`.
+  - **New-stack row**, after the last row, of the same height, always there: "Drop a photo here to start a new stack". A one-photo group reads `1 photo` with a `needs 2 photos` chip, and is neither written (§5.6) nor counted by `Write <n> stacks`.
+  - **Tray** `Unstacked (<n>)`, above the bar whenever the review is loaded, also empty ("No unstacked photos. Drag a photo here to take it out of its stack."): 72 px thumbnails in rows of one height, only those on screen laid out; a click selects. Its top edge resizes it from 128 px to half the height it shares with the groups (`panels.tray`; 150 px and at most a third of that height until resized).
+  - **Drag and drop:** any thumbnail drags (a press becomes a drag once the pointer moves; a drag never selects), a small copy following the pointer, onto a group's row (`move_file(file, Group(id))`), the tray (`Tray`) or the new-stack row (`NewGroup`), each lit with an accent fill stronger than a selected row's tint and a 2 px accent outline. The photo's own group, the tray for a tray photo, and anywhere else do nothing; refusals (§5.7) are notices. Near the list's edges a drag scrolls it. The inspector's `Move to unstacked`, `Start a new stack` and `Move to stack…` are the keyboard's and screen readers' way.
+  - Manual groups (`origin = manual`) are never regrouped by the sliders.
+- *Writing and results* (also a queued, failed or cancelled job once a group was confirmed for a write: `confirmed`, `written`, `skipped` or `failed`; with none, only its state):
+  - writing: the stage, `<done> of <total> photos`, a bar, the photo just done, Cancel; queued: "Waiting to write." and Cancel;
+  - ended: `<w> written, <s> skipped, <f> failed` and Open output folder; `Retry <k> stacks` for a completed job with stranded groups (§5.7); `Write the confirmed stacks` (`write`) for a cancelled job with confirmed groups left; a failed or cancelled job keeps its error or "This job was cancelled." and Retry;
+  - rows of the groups confirmed for a write, in position order: the top layer's thumbnail, `Stack <n>`, the first photo's name, the count, the status (`Waiting` until reached), then the file with "Reveal", or why it was skipped or failed, and the warnings on hover; a click selects;
+  - under them "<p> proposed and <r> rejected stacks were not written."; a completed job that wrote nothing says "No stack was written."
+
+**Inspector** (one scroll area that never widens the panel; long names cut in the middle, whole on hover)
+- *Nothing selected:* the job's input and output folders, format, RAW tone, RAW+JPEG preference, hash distance, time window, the model with its similarity and floor or "no visual check"; its photos, those that could not be read, its groups by status, the unstacked once loaded. Once its analysis is saved, `Could not be read (<n>)` and each file: its name (path on hover) over its reason as a sentence, in rows of one height, only those on screen laid out.
+- *The primary group:* number, status, chips, photo count; `EV −2..+2` (`write::layer_exposure`); from `write::predict_stack` (§5.6) the canvas and depth (`6000 × 4000, 16-bit`) and the file it will be written as (`IMG_0412_5.psd`; hover "(a name already taken gets a number added)"), or "Needs 2 photos of one resolution to be written."; "Measuring…" until it arrives; `hash distance up to <d>`; the visual check's verdict. Once written: the path and `Reveal`, or why it failed or was skipped, and the write's warnings. Then Confirm, Reject, `Split off the checked photos` (2 or more checked, 2 or more left) and `Merge <k> stacks` (2 or more groups selected). Then the members in layer order, rows of one height: a checkbox, the layer name as `Select <file name>`, resolution and depth (a member left out at another resolution has its name in the secondary colour and says so; a failed probe says why), warnings, and a move to the tray. Checked members hold while their group stays primary with the same members.
+- *A photo:* a 1,024 px preview (the 256 px thumbnail until it arrives, and why when it cannot be had); name and folder; camera, lens, focal length, exposure time, aperture, ISO, exposure bias, capture time; bracket mode, shot number and value; warnings or error. For a pair's active file "Paired with <name>, which is not stacked." and `Stack <name> instead` (`swap_active`). `Move to unstacked`, `Start a new stack`, and `Move to stack…`: at most 12 groups of its folder, the nearest to its own (from the tray, the first 12).
+- *Slow reads* (preview, prediction) run on a UI thread of their own: at most one of each kind waits (a newer one replaces it; a prediction no longer wanted is stopped by its flag), and each result is filed under what it answers (photo: job and path; group: job, members in order, format, tone), so a late one never shows under another selection. The last 8 previews and 32 predictions are kept, a failure only while shown. A preview is one full decode outside the engine's budget, one at a time, never asked for while the engine is busy (a job queued, scanning or writing, or embeddings being computed): the photo keeps its thumbnail and "The larger preview waits while a job is running." (a kept preview still shows); a decode already running finishes. Predictions read headers only and are not held back. Closing never waits for a decode.
+
+**Status bar:** totals, ML state, the engine's activity. After `EngineStopped` one line stays above the centre, "Photostacker's engine has stopped. Close and reopen the app; your jobs are kept.", and the activity goes.
+
+**Settings** replace the centre until `Done` (always in sight), Esc, or picking a job or `New job`; the job or the form shows again as left. A job submitted meanwhile is selected behind them.
+- *Appearance:* the theme (system, light, dark), shared with the toolbar's toggle, applied at once.
+- *New jobs start with:* the form's fields except the folders and the visual check (subfolders, format, write without review, RAW tone, RAW+JPEG preference, hash distance, time window, visual check floor), with the form's widgets and ranges, so no value can fail `JobConfig::validate()`; `Reset to the built-in defaults`. An open form keeps what it holds.
+- *Visual check (Stage 3):* the switch (which downloads nothing), the active model, download, import, delete, disk usage, the similarity of new jobs. Per model: name, size, licence and state (not installed; a bar with `43 % of 84 MB` and Cancel; cancelling; importing; installed with Delete). `Download` asks each time, naming every host in the registry's order, each once: "Download <name>? <size> through <first host>, or through <second host> if that cannot be reached. Nothing else is sent or received." (one host: "… <size> through <host>. Nothing else …"; a third follows the pattern). No request happens before the answer. A model's last failure (`ModelFailed`) stays under its row until the next command on it, with `Try again` after a failed download, which does not ask again. Without ONNX Runtime the card says where it was looked for, and the rows still work; without `ml` it says only that the build has no visual check.
+- *About:* the version; MIT; each non-MIT component with its licence and upstream repository as text: rawler (LGPL-2.1), libheif and libde265 (LGPL-3.0, with `heic`), ONNX Runtime (MIT) and the DINOv2 models (Apache-2.0) with `ml`, Inter (OFL-1.1); the HEVC patents' note (§3) with `heic`; `Open the logs folder`.
+
+**Saved** (prefs, §7.3): the theme, the new-job defaults, the window's inner size, the panels' sizes. A setting applies at once and is saved through the engine's thread (a newer save of a key replaces a waiting one; waiting saves still run at close). The sizes (never the position, never while maximised, minimised or in full screen) are saved once unchanged for a second, or when the window is asked to close, also after `Quit` hid it (eframe's `logic` alone). A panel drawn narrower by a small window keeps the size the user chose as its preference, so it grows back.
+
+**Errors:** every engine `Error` and `Warning` is a toast, as a sentence (a capital and a full stop, like every engine text on screen); job and file errors also stay inline. Equal notices of one frame make one toast; past three, "And <n> more: see the log." A failure on a screen the engine has moved past names no internal id ("That job is gone.", "That photo is no longer in the job.").
+
+**Closing while a job runs** (queued, scanning or writing, by the list or the engine's events, or a form submission not answered yet): the close is cancelled and the app asks "A job is still running. If you quit now it stops, and continues the next time you open Photostacker." with `Keep working` (the cautious answer; the keyboard and Esc) and `Quit`, which hides the window, then closes it; the engine leaves the job for the next start (§5.7). The question replaces an open one; a second request asks nothing more; it stays, both answers working, if the job ends meanwhile. A model download does not ask (its part is kept, §8.2). With nothing running the window closes at once.
+
+**A start that fails** opens a small window with `Quit`, which has the keyboard:
+- "Photostacker is already running. Its window has your jobs. If you have just closed it, it may still be finishing: try again in a moment." when another Photostacker holds the database (§7.2);
+- "Photostacker cannot find a folder for its data." when the platform has none;
+- "Photostacker cannot start one of its threads: <error>." when the engine's thread cannot start;
+- otherwise "Photostacker cannot open its database at <path>: <error>.", or "Photostacker cannot open its database: <error>." when the error names the path (SQLite's do), with `Open the folder` ("<path> does not exist." when it was never made).
+
+### 9.3 Accessibility and keyboard
+- Every interactive widget names itself (`WidgetInfo`), for screen readers and `egui_kittest`.
+- **In a review**, while no question is open and no control has the keyboard (a focused slider keeps its arrows, a focused button its Enter): Enter confirms the selected groups, Delete (and Backspace on macOS) rejects them, once per press (repeats ignored); Up and Down step the groups, Left and Right the primary group's photos, the list scrolling by as little as shows the primary group; Esc clears the selection. While a popup or menu is open (`Move to stack…`), none of these acts on the review.
+- In a job's writing and results, Esc clears the selection; a selection the results do not list is cleared when the job leaves its review.
+- Ctrl/Cmd+N starts a new job; Esc closes the form, and Settings.
+
+## 10. CLI
+
+```
+photostacker run <INPUT> [-o <OUTPUT>] [--format psd|tiff] [--recursive]
+                 [--hamming 8] [--window 30] [--ml-floor 6] [--cosine <f>]
+                 [--no-ml] [--model dinov2-small] [--raw-tone srgb|linear]
+                 [--raw-jpeg raw|jpeg] [--plan <file.json>] [--dry-run] [--db <path>]
+photostacker models list | download <id> | import <id> <file> | remove <id>
+```
+
+- **`run`** confirms and writes through the engine (§4.3), one job on an engine of its own, submitted without `auto_confirm`, so it stops in Review Pending after the scan (Stage 3 included). The plan is built from the stored analysis. A dry run prints or writes it and ends. Otherwise the plan file and the `error:` lines come first, then `confirm_all` and `write`, with `WriteOptions::default()`. The plan's config has `auto_confirm` set when the run writes. A failed group is reported and the next is written. With no group, nothing is written and the output folder is neither created nor checked; the summary says `0 written`.
+- **Stage 3:** `--model <id>` (`JobConfig.ml_model`, default `dinov2-small`); `--no-ml` (`ml_model` null; not with `--model`); `--cosine <f>` (`cosine_threshold`, 0.5–0.99, default the model's). An unknown model or a cosine out of range is a config error. Stage 3 runs only with the model installed in the app's models folder and ONNX Runtime loading (§8.3); otherwise ambiguous groups are `Skipped`, silently when not installed, with `warning: the visual check was skipped: <error>` when it cannot be loaded or run.
+- `--window`: the time window (§5.2), default 30, range 1–60, as in the app. `--raw-tone srgb|linear` sets `JobConfig.raw_tone` (default `srgb`; linear for HDR merging).
+- `--dry-run --plan groups.json` writes the proposed groups and stops (`auto_confirm` off).
+- **Plan JSON** (version 1): `version`, `input_dir`, `config`, `groups` (files in layer order, bucket key, max distance), `unstacked`, `paired` (passive → active), `errors` (failed files and unreadable entries, by path) and `warnings` (file, a stable `code` that is the warning's serde tag such as `no_capture_time`, and the text). Paths inside the input are relative to it, all with `/` separators (on Windows `\` becomes `/`, except in a verbatim `\\?\` path; on Unix a `\` is kept).
+- With `--plan` the file is replaced atomically: written as `<file>.partial`, synced, renamed over `<file>`, folder synced (§5.6; a failed folder sync is logged). A stale `<file>.partial` is removed first; a symlink at `<file>` becomes a regular file (its target untouched). A writing run writes the plan first and stops before any stack if it cannot.
+- **stdout** has the results only: a dry run without `--plan` prints the plan JSON (with `--plan`, nothing); a writing run prints the absolute path of each file written, one per line, in group order.
+- **stderr:** one progress line per stage (`discover`, `metadata`, `hash`, `group`, `embed` when Stage 3 computes embeddings, `write`), never per file; `warning: <message>` for each warning the engine sends for the job. A dry run ends with `N files, G groups, U unstacked, E errors`. A writing run prints first one `error: <file>: <reason>` per entry of the plan's `errors` (relative, in path order), and after writing one `stack of <first photo> skipped|failed: <reason>` per such stack, one `warning: <file>: <warning>` per writing warning (`LayerUnreadable`, `ResolutionMismatch`, `IccMismatch`), then `N files, G groups, U unstacked, E errors; W written, S skipped, F failed`. These are direct writes, not logs, so `RUST_LOG` never hides them.
+- **Logs** go to stderr, filtered by `RUST_LOG`, default `warn,rawler=off` (rawler logs what it recovers from, even at error level; the core reports what that costs a file; `RUST_LOG=rawler=debug` shows it). `log` records are forwarded to `tracing` (`tracing-log`), the bridge built at the filter's most verbose level.
+- **Exit codes:** 0 on success, per-file errors and skipped stacks included. 2 for a usage error or a config that fails `JobConfig::validate()`. 1 for a runtime failure: unreadable input folder; plan not written; an input or output folder that is not valid UTF-8 (refused at submit, since the store keeps the config as JSON) or another plan path that is not; a job database that cannot be opened; a `--db` in use by another engine (`error: another Photostacker is using <db>`, before submitting); a stopped worker (`error: the engine has stopped: <message>`, on `EngineStopped`); an unusable output folder (`WriteError::OutputDir`); a cancel (Ctrl+C); any stack that fails to be written (after every group was attempted). 130 when a second Ctrl+C ends the process.
+- **Ctrl+C:** the first press prints `cancelling: press Ctrl+C again to quit at once` and cancels the job. A scan stops at its next check; a write before its next group or layer, removing the interrupted stack and its `.partial` and spill files. The run then prints what it wrote (the `stack of …` lines, the summary, the paths) and `error: cancelled`, and exits 1; a press between the scan and the write ends it the same way, nothing written. A second press exits at once with 130: the stack being written keeps its partial and spill files, and without `--db` the temporary folder stays in the system temp folder; a `--db` job is resumed by the next run on that database, which removes the recorded partial (§7.3). In `models download` the first press cancels and keeps the part.
+- **Database:** by default an ephemeral database in a new temporary folder, removed at exit with its lock file (§7.2), so the CLI never competes with the app. `--db <file>` keeps the jobs there, and first resumes that database's unfinished jobs (§7.3), silently. Review thumbnails sit beside the database (the temporary folder, or `<file>.thumbs/`), never in the app's thumbnails folder.
+- **Models:** the app's models folder (`AppDirs`, §7.1), shared with the app and moved by `PHOTOSTACKER_DATA_DIR`. With no app folder (no home folder), `run` has no models and `models` commands fail.
+  - `models list`: one line per registry model on stdout: id, name, size in MiB, `installed: yes|no`.
+  - `models download <id>` (§8.2): `download: N% (… of … MiB)` on stderr every 5 %, the installed file on stdout; an installed model is not downloaded again.
+  - `models import <id> <file>` (§8.2): prints the installed file; a mismatch exits 1 with nothing installed: `this file is <n> MB, <name> is <m> MB` before copying, or `… does not match <id> …` for the right size with another hash.
+  - `models remove <id>` removes the folder; a model not there is no error.
+  - An unknown id is a usage error (2); a model another download, import or removal holds, in any process, is busy (1). Without `ml`, `download` and `import` exit 2 with `built without ml`; `list` and `remove` work.
+
+## 11. Dev environment, build, CI, release
+
+### 11.1 Building
+- **Toolchain:** `rust-version = "1.99"` in `[workspace.package]`, inherited by every crate.
+- **System packages:** a C toolchain, `cmake`, `pkg-config`, `nasm`, and `libde265` (library and headers) for HEIC. `libheif-sys` builds libheif with cmake and links whatever codecs it finds, so a build host must not have x265 or x264 installed (a test fails if they are linked). Per-platform package names are in [AGENTS.md](../AGENTS.md).
+- **ONNX Runtime** is not needed to build; it is loaded at run time (§8.3). `just ort` fetches it for the tests.
+- **Features** `ml` and `heic`, on by default in the core, the CLI and the app. Without `ml`, `models download` and `models import` exit 2 with "built without ml"; without `heic` no cmake or libde265 is needed, and HEIC files are reported as "built without heic".
+- **Recipes** (`justfile`): `check` (fmt, clippy `-D warnings`, nextest), `run`, `run-cli`, `screenshot <out.png> <screen> [dark|light] [width] [height]` (one named screen of the real window, 1360 × 820 by default, saved as a PNG), `ort`, `calibrate-ml` (§12.4), `ps-samples` (§12.5).
+- **Windows hand-trial build:** `pwsh scripts/win.ps1` builds the app with the MSVC toolchain without HEIC (`--no-default-features --features ml`), fetches ONNX Runtime 1.31.1 for Windows and checks it against §8.3, and fills `dist/windows/` with `Photostacker.exe`, `onnxruntime.dll` and ONNX Runtime's licence files. It needs the Visual Studio Build Tools' "Desktop development with C++" workload with the Windows SDK.
+
+### 11.2 CI
+Not written yet. It is to run fmt, clippy `-D warnings`, cargo-deny (licences, advisories, bans), and `cargo nextest run --workspace` with a release build of the UI, on Linux, Windows and macOS.
+
+**Licence allow-list:** MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, Zlib, Unicode-3.0, MPL-2.0, BSL-1.0 (the Windows clipboard crates under arboard), OFL-1.1 (fonts), and named LGPL exceptions: rawler (LGPL-2.1), libheif and libde265 (LGPL-3.0). Any GPL crate fails.
+
+### 11.3 Release
+Not written yet. On `v*` tags equal to the ui crate's version, it is to build deb and AppImage (Ubuntu 22.04), NSIS, MSI and zip (Windows) and dmg (macOS arm64), publish them with SHA-256 checksums and build-provenance attestations, keep the mirrored ONNX files in a one-off `models-v1` release (hashes as in §8.1), and ship `THIRD-PARTY-LICENSES.md` (cargo-about) in the packages and the About box.
+
+**LGPL:** rawler and libheif are linked statically, libde265 too except where it ships as a shared library (Linux, macOS). The app's complete source is public under MIT and builds with documented commands, so users can relink against modified versions (LGPL-2.1 §6, LGPL-3.0 §4(d)). The README and the About box name the components, licences, source locations, and the HEVC-patent caveat.
+
+## 12. Testing and parity
+
+Every rule of §5 has a scripted scenario test: pipeline rules in `crates/core/tests/scenarios.rs`, writer rules in `crates/core/tests/write_scenarios.rs`. Fixtures are built with `photostacker-testkit`, not committed as large binaries.
+
+### 12.1 Core
+Unit tests per module (MakerNotes on per-vendor byte fixtures, bucketing edges, union-find, profile rules, layer order, the encoders against hand-built bytes); scenario tests on synthetic sets (five exposures, burst jitter, rotated orientation tags, a near-duplicate distractor, mixed resolutions and depths); writer round-trips through the testkit's strict PSD/PSB reader, the `psd` crate (8-bit) and the `tiff` crate with our tag-37724 parser, each checking layer count, names, order, depth, pixels and that the composite is the top layer (blended against white with alpha, §6.2); a memory test (on Linux, `write_stack` on six 6000×4000 16-bit TIFFs, about 860 MB decoded, keeps `VmHWM` under 700 MiB); resume tests (`crates/core/tests/engine.rs`: a restarted scan equals an uninterrupted one with fewer files examined; a planted crashed write is cleaned and written once, never removing an unrecorded file; review jobs reopen unchanged; jobs resume in id order).
+
+### 12.2 UI
+Unit tests without a window; `crates/ui/tests/controller.rs` (the controller over a real engine, no window); `tests/thumbs.rs`; `tests/interaction.rs` (`egui_kittest`: the real widgets over a real engine, found by accessible names and roles, with stand-ins in `tests/common/` so no test reaches the network or the machine's ONNX Runtime; end-to-end runs from an empty data folder to files on disk through the widgets alone; every screen of `tests/screens/` at 900 × 560 in both themes; frames drawn while the backend thread is held).
+
+### 12.3 Parity with Python's imagehash
+The hashes of §5.3 are defined by Python's `imagehash` (pHash, dHash) on Pillow's resampling. Golden files generated with Pillow 12.2.0 and imagehash 4.3.2 are committed: `crates/core/tests/fixtures/hash/` holds 40 fixtures (JPEGs, PNGs, and two pairs of an orientation-tagged file and its rotated pixels) with `golden.json`. `crates/core/tests/hash_parity.rs` pins:
+- the combined distance between imagehash's plain pHash + dHash and ours, per file: ≤ 2 on at least 95 % of the fixtures, never > 4 (bit-exactness is not required: JPEG decoders differ). The normalised pair has no golden;
+- Pillow's thumbnail (fractional box reduction) and its 9×8 and 32×32 Lanczos resizes of the luma, byte for byte on the PNG fixtures;
+- imagehash's hex text as the MSB-first bit array;
+- equal hashes for an orientation-tagged file and its rotated pixels.
+
+So imagehash's distance thresholds keep their meaning.
+
+**EXIF** is checked against ExifTool (`exiftool -j -n -G1 -a`) on real camera files by `crates/core/tests/exif_golden.rs`: standard fields equal ExifTool's; bracket fields equal the documented mapping of ExifTool's numeric MakerNote values. That golden and the files live outside git, in the folder `PHOTOSTACKER_FIXTURES` names, with public RAW sets (Canon CR2/CR3, Nikon NEF, Sony ARW, Fujifilm RAF), HEIC and bracket sets with MakerNotes from Canon, Nikon, Sony and Fujifilm bodies. Tests that need it report the skip and pass without it. Coverage: [exif-fixture-coverage.md](exif-fixture-coverage.md).
+
+### 12.4 dinov2-small calibration
+- **Harness:** `just calibrate-ml <model-id> <sets-root> [<distractors-root>]` (`crates/core/examples/calibrate_ml.rs`) reads the model from `PHOTOSTACKER_MODELS_DIR` and embeds as Stage 3 does (active files that hash, from their 512 px upright thumbnail). Each folder under `<sets-root>` with photos is one true set. It prints cosines within sets, across sets and against distractors, and suggests a threshold: the midpoint of the gap between the smallest within-set cosine and the largest negative, or the smallest within-set cosine when they overlap, rounded to 0.01 but never above it, then clamped to 0.5–0.99 (last, so it can lift the value above the smallest within-set cosine). `--check-groups` (reruns Stage 3 with `group::regroup` at several thresholds) and `--check-series` print aggregates only, so they run on private folders.
+- **Choice:** on labelled data only, the six public bracket sets (pairs within a set positive, across sets negative). They overlap, since a ±6 EV bracket's ends look unalike to DINOv2 (0.10), so the rule gives the floor, **0.50**; every cross-set pair is below it (at most 0.42). Camera-confirmed brackets never depend on it, their run links being fixed edges (§5.4). Numbers and the dinov2-base reference: [calibration.md](calibration.md) § "Stage 3".
+- No public near-duplicate distractor set exists yet; one would be `<distractors-root>`.
+- The same harness decides whether another model (§8.4) may join the registry.
+
+### 12.5 Photoshop checkpoints and the manual release checklist
+- **Checkpoints:** (1) the PSD/PSB encoder, which also decides the 16-bit layer compression; (2) the layered TIFF; (3) each release.
+- **Three stand-in readers** are the check that runs after any change to a writer: GIMP, PhotoCraft and Photopea, each written independently of ours. `scripts/standins/standins.mjs` (Node) opens every sample in each and compares what they read: layers, names, order, flags, profile, every layer's pixels across containers, the merged image. It exits non-zero when a reader disagrees beyond the known limits the script lists.
+- **Photoshop itself** opens the set by hand before the first public release and before each release. Only it can say whether it warns; until then the 16-bit ZIP default (§6.1) and the absent tag 34377 (§6.3) are provisional.
+- **The set**, written by `just ps-samples` to `dist/ps-check/`: PSD 8- and 16-bit, PackBits and ZIP; PSD 8- and 16-bit RGBA (negative layer count, in `Lr16` too); a PSD from 8-bit gray sources with a Gray ICC profile, which must not travel; a PSD from untagged JPEG sources whose EXIF marks them DCF Adobe RGB (ColorSpace 0xFFFF, Interop `R03`), which must embed "Photostacker Adobe RGB (1998)" (§5.5), the sources carrying saturated patches and a gray ramp; PSB wider than 30,000 px, 8- and 16-bit; layered TIFF 8-bit, 16-bit and 8-bit RGBA (ExtraSamples 2); BigTIFF, opt-in (`just ps-samples --bigtiff`: about 3 GB of memory and a minute); a 5-layer real bracket (the public Empa D200 NEF ×5 set, from `PHOTOSTACKER_FIXTURES`) as PSD and TIFF.
+- The example (`crates/core/examples/ps_samples.rs`) clears only the regular files of a folder whose path ends in `dist/ps-check` with no link or `..`, and those of its `sources` folder (not a link). The gray and Adobe RGB sources are written to `sources` and stay there; they are read as the writers read files (the Adobe RGB profile comes from their EXIF through `ColourHint::from_exif`). Every file is read back before exit: its ICC profile (and a generated profile's name) and, in a TIFF, ExtraSamples.
+- **Check:** no warning on open; correct layers, names and order; a correct composite and preview.
+- **Results** in [photoshop-checks.md](photoshop-checks.md), one row per file per checkpoint, with each stand-in's findings.

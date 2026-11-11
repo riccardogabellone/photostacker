@@ -1,0 +1,112 @@
+[workspace]
+resolver = "3"
+members = ["crates/core", "crates/cli", "crates/testkit", "crates/ui"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+# The toolchain everything here is built and tested with.
+rust-version = "1.99"
+license = "MIT"
+repository = "https://github.com/riccardogabellone/photostacker"
+
+[workspace.dependencies]
+# Workspace crates
+# Default features off, so a member opts into each codec (the CLI re-exports `heic`).
+photostacker-core = { path = "crates/core", default-features = false }
+photostacker-testkit = { path = "crates/testkit" }
+
+# Imaging
+# Members pick the codecs they need; the defaults pull in heavy encoders (AVIF via rav1e).
+image = { version = "0.25", default-features = false }
+rawler = "0.8"
+libheif-rs = "3"
+
+# Runtime
+rayon = "1"
+# The engine's event stream (spec §4.3).
+crossbeam-channel = "0.5"
+blake3 = "1"
+# zlib streams of the writers, on its default pure-Rust backend (miniz_oxide).
+flate2 = "1"
+chrono = { version = "0.4", default-features = false }
+serde = "1"
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+clap = "4"
+anyhow = "1"
+# Members enable only the subscriber parts they use.
+tracing-subscriber = { version = "0.3", default-features = false }
+# Forwards the `log` records of dependencies (rawler) to `tracing`.
+tracing-log = "0.2"
+# The app's log files: a file a day, the oldest removed, written off the logging thread.
+tracing-appender = "0.2"
+# The CLI cancels a run or a download on Ctrl+C.
+ctrlc = "3"
+
+# Store
+# SQLite compiled in, so no system library is needed.
+rusqlite = { version = "0.40", features = ["bundled"] }
+# 2.6 requires rusqlite 0.40, which is why rusqlite is not 0.41.
+rusqlite_migration = "2.6"
+# The vec0 virtual tables of the embeddings, registered as an auto extension.
+sqlite-vec = "0.1.9"
+# The per-platform app data and cache folders.
+directories = "6"
+
+# ML (core feature `ml`)
+# The model download: blocking HTTP over rustls, so no system OpenSSL.
+ureq = "3.5"
+# Verifies a downloaded or imported model file.
+sha2 = "0.11"
+# The embedder: ONNX Runtime on the CPU, loaded at run time from Microsoft's
+# official shared library beside the executable (spec §8.3); nothing links it
+# at build time. No ndarray: tensors are (shape, Vec<f32>).
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "load-dynamic", "api-17"] }
+
+# UI (crates/ui). One egui version for every egui crate (crates/ui/DESIGN.md).
+# Members pick the renderer and platform features (crates/ui/Cargo.toml).
+eframe = { version = "0.37", default-features = false }
+# UI icons: an icon font registered behind Inter.
+egui_material_icons = "0.9"
+# Toasts: the engine's errors and warnings, and the app's notices.
+egui-notify = "0.24"
+# Native folder and file pickers; on Linux through the XDG desktop portal, so no GTK.
+rfd = "0.18"
+# Shows an output or a job's folder in the file manager.
+opener = "0.9"
+# The least recently used thumbnail textures go first.
+lru = "0.19"
+# Embeds the icon and version details in the Windows executable.
+winresource = "0.1"
+
+# Tests
+tempfile = "3"
+# Dev-only: drives the UI headlessly and finds widgets by their labels.
+egui_kittest = "0.37"
+assert_cmd = "2"
+# Dev-only: an independent PSD parser for the writer's cross-check (MIT).
+psd = "0.3"
+# Dev-only: reads the layered TIFFs back (MIT); image 0.25 already pulls it in.
+tiff = { version = "0.11.3", default-features = false, features = ["deflate"] }
+
+# Panics must unwind: the core catches them around rawler and around each
+# file's analysis (`crates/core/src/guard.rs`), so one broken file cannot end
+# a whole analysis. `panic = "abort"` would silently undo that.
+# Line tables only: backtraces keep file:line, and the debug build cache stays a
+# fraction of full debug info's size (it grew to ~31 GB per build in WSL).
+[profile.dev]
+panic = "unwind"
+debug = "line-tables-only"
+
+[profile.release]
+panic = "unwind"
+
+# Keeps image-heavy tests fast; decoding and hashing are slow without optimisation.
+[profile.test]
+opt-level = 2
+
+# Dependencies (decoders, resizers) are optimised in dev builds too; our own code stays debuggable.
+[profile.dev.package."*"]
+opt-level = 2

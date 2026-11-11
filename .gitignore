@@ -1,0 +1,24 @@
+# Build output: cargo's target folder, and what the scripts and recipes leave in dist
+# (scripts/win.ps1, `just ps-samples`, the stand-in readers)
+/target/
+/dist/
+
+# Local settings of the recipes (CARGO_TARGET_DIR and the like)
+.env
+.envrc
+
+# Logo pipeline scratch (previews); the SVG masters and assets/icons/ are committed
+/assets/logo/build/
+
+# Python caches of the fixture and golden scripts
+__pycache__/
+
+# Local photos to try the app on
+/inputs/
+
+# Local notes and agent tooling
+/docs/superpowers/
+/CLAUDE.md
+/CLAUDE.MD
+/.claude/
+/.superpowers/

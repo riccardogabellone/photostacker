@@ -1,0 +1,69 @@
+[package]
+name = "photostacker-ui"
+description = "Photostacker desktop app."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# The executable users see: Photostacker.exe on Windows, Photostacker elsewhere. The
+# display name and the app id come from src/identity.rs.
+[[bin]]
+name = "Photostacker"
+path = "src/main.rs"
+
+[features]
+default = ["heic", "ml"]
+# HEIC/HEIF support in the core (libheif, LGPL-3.0); off builds without cmake.
+heic = ["photostacker-core/heic"]
+# Stage 3 in the core: the visual check of the ambiguous stacks, and installing
+# its models. Without it the app never runs Stage 3.
+ml = ["photostacker-core/ml"]
+
+[dependencies]
+# The engine's event stream, which the backend hands to the controller.
+crossbeam-channel.workspace = true
+# `clipboard`: the system clipboard (arboard, and smithay-clipboard on Wayland), so a path
+# copied in another program pastes into a field, and the About card's addresses copy out.
+eframe = { workspace = true, features = ["accesskit", "clipboard", "default_fonts", "wayland", "x11"] }
+egui-notify.workspace = true
+egui_material_icons.workspace = true
+# Decodes the review thumbnails, which the engine writes as JPEGs, on the loader thread.
+image = { workspace = true, features = ["jpeg"] }
+lru.workspace = true
+# `reveal` selects a file in its folder.
+opener = { workspace = true, features = ["reveal"] }
+photostacker-core = { workspace = true, default-features = false }
+rfd.workspace = true
+serde = { workspace = true, features = ["derive"] }
+tracing.workspace = true
+# The log files in the logs folder, a file a day (src/logging.rs).
+tracing-appender.workspace = true
+# rawler logs through `log`; this forwards its records to the subscriber.
+tracing-log.workspace = true
+# Logs to the day's file, and to stderr in a debug build, filtered by RUST_LOG (default:
+# info,rawler=off). Not its `tracing-log` feature: through the workspace's feature
+# unification it would make the CLI's `fmt().init()` install a second `log` bridge.
+tracing-subscriber = { workspace = true, features = ["fmt", "env-filter"] }
+
+# The renderer: OpenGL, except on Windows. There the OpenGL driver's memory grew with every
+# frame drawn (measured in genetic_algo on an NVIDIA GPU: about 20 KB per frame, 2 GB after
+# half an hour), so Windows draws with wgpu, on DirectX 12 or Vulkan. See src/renderer.rs.
+[target.'cfg(not(windows))'.dependencies]
+eframe = { workspace = true, features = ["glow"] }
+
+[target.'cfg(windows)'.dependencies]
+eframe = { workspace = true, features = ["wgpu"] }
+
+[dev-dependencies]
+egui_kittest = { workspace = true, features = ["eframe"] }
+# The screenshot example writes PNGs; the tests' stand-in model takes `RgbImage`s, and the
+# thumbnail tests write JPEGs (the `jpeg` feature above).
+image = { workspace = true, features = ["png"] }
+photostacker-testkit.workspace = true
+# The tests' and the screenshot's data folders.
+tempfile.workspace = true
+
+[target.'cfg(windows)'.build-dependencies]
+winresource.workspace = true

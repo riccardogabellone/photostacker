@@ -1,0 +1,6 @@
+# No file of the user's is memory-mapped (spec §4.3): a file truncated or
+# removed while it is mapped kills the process (SIGBUS on Unix, an in-page
+# error on Windows), so a card pulled during a scan would end the app.
+disallowed-methods = [
+    { path = "rawler::rawsource::RawSource::new", reason = "it memory-maps the file; read it into memory and use RawSource::new_from_shared_vec (see decode::raw::raw_source)" },
+]

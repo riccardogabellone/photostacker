@@ -1,0 +1,122 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Photopea check</title>
+<style>html, body { margin: 0; height: 100%; } iframe { width: 100%; height: 100%; border: 0; display: block; }</style>
+<!-- standins.mjs serves this page and the samples on 127.0.0.1 and drives it in a
+     headless browser. Photopea runs in the frame, in the browser: no file is uploaded. -->
+<iframe id="pp" src="https://www.photopea.com#%7B%22environment%22%3A%7B%22intro%22%3Afalse%7D%7D"></iframe>
+<script>
+// Photopea's documented embedding: the parent posts a file (ArrayBuffer) or a script
+// (string); Photopea posts back what the script echoes, then "done".
+const frame = document.getElementById('pp');
+window.pp = { ready: false, results: {}, running: null };
+let handler = null;
+window.addEventListener('message', (event) => {
+  if (event.source !== frame.contentWindow) return;
+  if (!window.pp.ready && event.data === 'done') { window.pp.ready = true; return; }
+  if (handler) handler(event.data);
+});
+
+function send(message, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const got = [];
+    const timer = setTimeout(() => { handler = null; reject(new Error('no answer in ' + Math.round(timeoutMs / 1000) + ' s')); }, timeoutMs);
+    handler = (data) => {
+      if (data === 'done') { clearTimeout(timer); handler = null; resolve(got); } else got.push(data);
+    };
+    frame.contentWindow.postMessage(message, '*');
+  });
+}
+
+// Photopea's script scope does not keep function declarations (a call to one answers
+// nothing), so the script is straight-line: one guarded assignment per property.
+const DOC = {
+  width: 'Number(d.width)', height: 'Number(d.height)', resolution: 'd.resolution',
+  layerCount: 'd.layers.length', layerSets: 'd.layerSets.length'
+};
+const LAYER = {
+  name: 'l.name', visible: 'l.visible', opacity: 'l.opacity', fill: 'l.fillOpacity', blend: 'String(l.blendMode)',
+  allLocked: 'l.allLocked', pixelsLocked: 'l.pixelsLocked', positionLocked: 'l.positionLocked',
+  transparentPixelsLocked: 'l.transparentPixelsLocked', background: 'l.isBackgroundLayer',
+  bounds: '[l.bounds[0].value, l.bounds[1].value, l.bounds[2].value, l.bounds[3].value]'
+};
+const guarded = (target, map) => Object.entries(map)
+  .map(([key, expression]) => `try { ${target}.${key} = ${expression}; } catch (e) { ${target}.${key} = "ERR " + e; }`)
+  .join(' ');
+const INFO = `var d = app.activeDocument; var out = {}; ${guarded('out', DOC)} var ls = []; `
+  + `for (var i = 0; i < d.layers.length; i++) { var l = d.layers[i]; var o = {}; ${guarded('o', LAYER)} ls.push(o); } `
+  + `out.layers = ls; app.echoToOE(JSON.stringify(out));`;
+
+const hex = (buffer) => Array.from(new Uint8Array(buffer)).map((b) => b.toString(16).padStart(2, '0')).join('');
+
+// What Photopea renders, from the PNG it exports: one SHA-1 per channel, as
+// gimp_check.py digests an 8-bit layer, so the two can be compared.
+async function pixels(buffer) {
+  const bitmap = await createImageBitmap(new Blob([buffer], { type: 'image/png' }), { premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
+  const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+  const context = canvas.getContext('2d', { willReadFrequently: true, colorSpace: 'srgb' });
+  context.drawImage(bitmap, 0, 0);
+  const data = context.getImageData(0, 0, bitmap.width, bitmap.height).data;
+  const count = data.length / 4;
+  const planes = [];
+  for (let channel = 0; channel < 4; channel++) {
+    const plane = new Uint8Array(count);
+    for (let i = 0, j = channel; i < count; i++, j += 4) plane[i] = data[j];
+    planes.push(hex(await crypto.subtle.digest('SHA-1', plane)).slice(0, 16));
+  }
+  const at = (x, y) => Array.from(data.slice((y * bitmap.width + x) * 4, (y * bitmap.width + x) * 4 + 4));
+  let low = 255, high = 0, sum = 0, clear = 0, solid = 0;
+  for (let i = 3; i < data.length; i += 4) {
+    const a = data[i];
+    if (a < low) low = a;
+    if (a > high) high = a;
+    sum += a;
+    if (a === 0) clear++;
+    if (a === 255) solid++;
+  }
+  return {
+    width: bitmap.width, height: bitmap.height, planes, alpha: [low, high], alphaMean: sum / count, clear, solid,
+    samples: { centre: at(bitmap.width >> 1, bitmap.height >> 1), quarter: at(bitmap.width >> 2, bitmap.height >> 2) }
+  };
+}
+
+async function step(record, name, work) {
+  try { record[name] = await work(); } catch (error) { record[name + 'Error'] = String(error); }
+}
+
+async function check(name, openTimeoutMs) {
+  const record = { file: name };
+  const started = performance.now();
+  try {
+    const before = Number((await send('app.echoToOE(String(app.documents.length))', 30000))[0]);
+    const response = await fetch('/files/' + encodeURIComponent(name));
+    if (!response.ok) throw new Error('fetch ' + response.status);
+    await send(await response.arrayBuffer(), openTimeoutMs);
+    const after = Number((await send('app.echoToOE(String(app.documents.length))', 30000))[0]);
+    record.opened = after === before + 1;
+    record.openSeconds = Math.round((performance.now() - started) / 100) / 10;
+    if (record.opened) {
+      await step(record, 'info', async () => JSON.parse((await send(INFO, 30000))[0]));
+      await step(record, 'png', async () => {
+        const exported = await send('app.activeDocument.saveToOE("png")', 300000);
+        const png = exported.find((reply) => reply instanceof ArrayBuffer);
+        if (!png) throw new Error('no PNG came back');
+        return pixels(png);
+      });
+      await step(record, 'closed', async () => (await send('app.activeDocument.close()', 60000)).length);
+    }
+  } catch (error) {
+    record.error = String(error);
+  }
+  record.seconds = Math.round((performance.now() - started) / 100) / 10;
+  return record;
+}
+
+window.pp.run = async (names, openTimeoutMs) => {
+  for (const name of names) {
+    window.pp.running = name;
+    try { window.pp.results[name] = await check(name, openTimeoutMs); } catch (error) { window.pp.results[name] = { file: name, error: String(error) }; }
+  }
+  window.pp.running = null;
+};
+</script>

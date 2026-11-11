@@ -1,0 +1,40 @@
+[package]
+name = "photostacker-cli"
+description = "Photostacker command-line interface."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "photostacker"
+path = "src/main.rs"
+
+[features]
+default = ["heic", "ml"]
+# HEIC/HEIF support in the core (libheif, LGPL-3.0); off builds without cmake.
+heic = ["photostacker-core/heic"]
+# Stage 3 in the core: `run` checks the ambiguous groups with the installed
+# model (the embedder, on ONNX Runtime), and `models download|import` install
+# one. Without it `run` skips Stage 3, and a model cannot be installed.
+ml = ["photostacker-core/ml"]
+
+[dependencies]
+anyhow.workspace = true
+clap = { workspace = true, features = ["derive"] }
+# The first Ctrl+C cancels the job or the download; a second exits at once.
+ctrlc.workspace = true
+photostacker-core = { workspace = true, default-features = false }
+serde_json.workspace = true
+# The ephemeral job database of `run` without `--db`, removed at exit.
+tempfile.workspace = true
+# rawler logs through `log`; this forwards its records to the subscriber.
+tracing-log.workspace = true
+# Logs to stderr, filtered by RUST_LOG (default: warn,rawler=off).
+tracing-subscriber = { workspace = true, features = ["fmt", "env-filter"] }
+
+[dev-dependencies]
+assert_cmd.workspace = true
+photostacker-testkit.workspace = true
+tempfile.workspace = true

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Photostacker
+Comment=Stack exposure brackets and bursts as layers in one PSD or TIFF
+Exec=Photostacker
+Icon=io.github.riccardogabellone.Photostacker
+Terminal=false
+Categories=Graphics;Photography;
+StartupNotify=true
+StartupWMClass=io.github.riccardogabellone.Photostacker
+SingleMainWindow=true

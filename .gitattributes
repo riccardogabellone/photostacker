@@ -1,0 +1,11 @@
+# LF everywhere: the justfile and the shell scripts break on CRLF.
+* text=auto eol=lf
+
+# Images and layered outputs are never text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.psd binary
+*.psb binary
+*.tif binary
+*.tiff binary
