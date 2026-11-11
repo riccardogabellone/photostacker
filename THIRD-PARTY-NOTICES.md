@@ -6,11 +6,12 @@ fastframe and ZapFast) names the original files, where they live in this tree,
 and the original licence, reproduced verbatim.
 
 The sections after them reproduce no licence text. The imagehash section
-credits a method this project follows, from which no code is ported. The
-project's packages also hold parts that are not in this tree, or that need
-more than a licence text: from rawler on, each section says what the part is,
-how it reaches the packages, where its source is, and where its licence text
-is.
+credits a method this project follows, from which no code is ported. From
+rawler on, each section is about a part the project's packages hold or the
+app obtains, which is not in this tree or needs more than a licence text: it
+says what the part is, under which licence, and how it reaches the user; where
+the part's source and licence text are known, it says where they are.
+
 The licence of every Rust crate built into the app and the command-line tool,
 with its text, is in `THIRD-PARTY-LICENSES.md`, which a package holds beside
 this file in its `licenses` folder (the app's About card opens that folder).
@@ -239,10 +240,9 @@ HEIC and HEIF photos are decoded by libheif
 (https://github.com/strukturag/libheif), whose HEVC decoder is libde265
 (https://github.com/strukturag/libde265). Both libraries and their use are
 covered by the GNU Lesser General Public License, version 3 or (at your
-option) any later version. That licence is
-written as additions to the GNU General Public License, version 3, so both
-texts ship beside this file, as the Free Software Foundation publishes them:
-`LGPL-3.0.txt` and `GPL-3.0.txt`.
+option) any later version. That licence is written as additions to the GNU
+General Public License, version 3, so both texts ship beside this file, as the
+Free Software Foundation publishes them: `LGPL-3.0.txt` and `GPL-3.0.txt`.
 
 How each reaches the packages:
 
@@ -286,9 +286,9 @@ built for Windows or macOS, nor into the command-line tool.
 On Linux the desktop app includes Rust code that the
 `wayland-protocols-plasma` crate (declared MIT, part of the wayland-rs
 project, https://github.com/smithay/wayland-rs) generates from KDE's Wayland
-protocol files. The crate is there for Wayland: winit, the window library under the
-app's toolkit (eframe), brings it in with its `wayland` feature. The version
-built in is the one `Cargo.lock` pins.
+protocol files. The crate is there for Wayland: winit, the window library
+under the app's toolkit (eframe), brings it in with its `wayland` feature. The
+version built in is the one `Cargo.lock` pins.
 
 The crate carries KDE's plasma-wayland-protocols
 (https://invent.kde.org/libraries/plasma-wayland-protocols; the crate itself

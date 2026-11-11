@@ -19,16 +19,22 @@ A crate offered under a choice of licences is listed under the one Photostacker 
 {{#each licenses}}
 ### {{{name}}} (`{{{id}}}`)
 
+{{#if source_path}}
 Used by:
 
 {{#each used_by}}
 - {{{crate.name}}} {{{crate.version}}}: {{#if crate.repository}}{{{crate.repository}}}{{else}}https://crates.io/crates/{{{crate.name}}}{{/if}}
 {{/each}}
+{{else}}
+These crates were published without a licence file, and their repositories held no licence text at the commits they were published from. The text below is the licence's standard text. Beside each crate are the authors its package declares, if any.
 
-{{#unless source_path}}
-No licence file of these crates, in the crate or in its repository, holds this licence's text, so this is its standard text.
+Used by:
 
-{{/unless}}
+{{#each used_by}}
+- {{{crate.name}}} {{{crate.version}}}: {{#if crate.repository}}{{{crate.repository}}}{{else}}https://crates.io/crates/{{{crate.name}}}{{/if}}; {{#if crate.authors}}authors: {{#each crate.authors}}{{#unless @first}}, {{/unless}}{{{this}}}{{/each}}{{else}}no authors declared{{/if}}
+{{/each}}
+{{/if}}
+
 `````text
 {{{text}}}
 `````
