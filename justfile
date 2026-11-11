@@ -36,6 +36,11 @@ clippy:
 test *ARGS:
     cargo nextest run --workspace "$@"
 
+# Check the dependencies' licences, advisories, bans and sources against deny.toml (spec §11.2).
+# Not part of `check`: it downloads the advisory database, and `check` works offline.
+deny:
+    cargo deny check
+
 # Run the desktop app in release mode; arguments go to the binary.
 run *ARGS:
     cargo run --release -p photostacker-ui -- "$@"

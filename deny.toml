@@ -1,0 +1,83 @@
+# cargo-deny's configuration: `just deny` checks the dependencies' licences,
+# security advisories, banned crates and sources (spec §11.2). Every setting
+# not written here is the tool's default.
+
+[graph]
+# The four targets the releases ship. Crates that only build for other
+# targets (the web, Android, iOS) never reach a user, so they are left out.
+# The default features are the shipped ones (`ml`, `heic`), so the graph keeps
+# them. Development dependencies stay in: they are not shipped, but a test
+# dependency under a licence the project refuses is not wanted either.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+]
+
+[advisories]
+# A vulnerability always fails the check. Unsound code fails too, wherever it
+# is in the graph.
+unsound = "all"
+# Each ignored advisory still prints a note. Remove the entry when what it
+# names goes away.
+ignore = [
+    # zbus_names, zvariant and zvariant_derive are unmaintained as crates of
+    # their own: zbus 6 took them in. zbus 5 brings them, on Linux only,
+    # through the app's accessibility (eframe → accesskit_unix → atspi) and
+    # `opener` (showing a file in the file manager); the latest releases of
+    # both still depend on zbus 5. Remove these when they move to zbus 6.
+    { id = "RUSTSEC-2026-0370", reason = "zvariant: merged into zbus 6; zbus 5 brings it under accesskit_unix (eframe) and opener; drop this when they move to zbus 6" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names: merged into zbus 6; zbus 5 brings it under accesskit_unix (eframe) and opener; drop this when they move to zbus 6" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive: merged into zbus 6; zbus 5 brings it under accesskit_unix (eframe) and opener; drop this when they move to zbus 6" },
+]
+
+[licenses]
+# Permissive licences only; copyleft is allowed by named exception below.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "MPL-2.0",
+    # The Windows clipboard crates under arboard (clipboard-win, error-code).
+    "BSL-1.0",
+    # Fonts: egui's default fonts (epaint_default_fonts); Inter, the app's
+    # own font, is not a crate.
+    "OFL-1.1",
+    # egui's default fonts (epaint_default_fonts) include Ubuntu Light.
+    "Ubuntu-font-1.0",
+    # The root certificates (webpki-roots) that ureq's rustls trusts for the
+    # model downloads.
+    "CDLA-Permissive-2.0",
+]
+exceptions = [
+    # The RAW decoder (spec §3). rawler declares the deprecated SPDX
+    # identifier `LGPL-2.1` (version 2.1 only), and only that spelling matches
+    # it: `LGPL-2.1-only` does not. The check also warns that the identifier is
+    # deprecated; the warning stays until rawler declares `LGPL-2.1-only`.
+    { crate = "rawler", allow = ["LGPL-2.1"] },
+]
+# No exception for HEIC: libheif-rs and libheif-sys are MIT. The libraries
+# they build and link, libheif and libde265 (LGPL-3.0), are C libraries cargo
+# does not see; spec §3 and §11.3 cover them.
+
+[bans]
+# Reported, not failed: most come from the window toolkit's platform crates.
+multiple-versions = "warn"
+deny = [
+    { crate = "exiftool", reason = "the project reads EXIF and MakerNotes with its own reader" },
+    { crate = "exiftool-rs", reason = "GPL; the project reads EXIF and MakerNotes with its own reader" },
+    { crate = "kamadak-exif", reason = "the project reads EXIF and MakerNotes with its own reader" },
+    { crate = "nom-exif", reason = "the project reads EXIF and MakerNotes with its own reader" },
+    { crate = "openssl-sys", reason = "TLS is rustls only, so no system OpenSSL is linked" },
+    { crate = "native-tls", reason = "TLS is rustls only, so no system OpenSSL is linked" },
+]
+
+[sources]
+# crates.io only (the tool's default registry list): no other registry, no git.
+unknown-registry = "deny"
+unknown-git = "deny"

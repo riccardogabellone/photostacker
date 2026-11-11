@@ -61,7 +61,7 @@ Photostacker replaces a slow manual Photoshop routine. All logic and UI are in R
 | Camera brands | Canon, Nikon, Sony, Fujifilm, in that priority. |
 | Layer order | First shot on top, so shot 1 is the composite and the preview (§5.6). |
 | Output folder | `<input>/stacked` by default; the scan skips it; nothing is overwritten (§5.6). |
-| HEIC licensing | libheif and libde265 are LGPL-3.0, documented in THIRD-PARTY-LICENSES, the README and the About box, with named cargo-deny exceptions. HEVC-patent status is the same grey area GIMP and ImageMagick ship with. |
+| HEIC licensing | libheif and libde265 are LGPL-3.0, documented in THIRD-PARTY-LICENSES, the README and the About box. Cargo sees only their bindings, `libheif-rs` and `libheif-sys`, both MIT, so cargo-deny has no entry for them. HEVC-patent status is the same grey area GIMP and ImageMagick ship with. |
 
 Stage-2 hashes cannot match Python's `imagehash` bit for bit (decoders and resamplers differ); the commitment is near-parity on a committed corpus (§12.3), so imagehash's thresholds keep their meaning.
 
@@ -566,13 +566,13 @@ photostacker-cli info
   - `LIBSQLITE3_FLAGS` is `-DSQLITE_ENABLE_MEMORY_MANAGEMENT`: the bundled SQLite's one page cache for the process (§4.3). A value set in the environment must include it.
 - **ONNX Runtime** is not needed to build; it is loaded at run time (§8.3). `just ort` fetches it for the tests.
 - **Features** `ml` and `heic`, on by default in the core, the CLI and the app. Without `ml`, `models download` and `models import` exit 2 with "built without ml"; without `heic` no cmake or libde265 is needed, and HEIC files are reported as "built without heic".
-- **Recipes** (`justfile`): `check` (fmt, clippy `-D warnings`, nextest), `run`, `run-cli`, `screenshot <out.png> <screen> [dark|light] [width] [height]` (one named screen of the real window, 1360 × 820 by default, saved as a PNG), `ort`, `calibrate-ml` (§12.4), `ps-samples` (§12.5).
+- **Recipes** (`justfile`): `check` (fmt, clippy `-D warnings`, nextest), `run`, `run-cli`, `screenshot <out.png> <screen> [dark|light] [width] [height]` (one named screen of the real window, 1360 × 820 by default, saved as a PNG), `ort`, `calibrate-ml` (§12.4), `ps-samples` (§12.5), `deny` (cargo-deny, §11.2; it downloads the advisory database, so `check` leaves it out).
 - **Windows hand-trial build:** `pwsh scripts/win.ps1` builds the app with the MSVC toolchain without HEIC (`--no-default-features --features ml`), fetches the ONNX Runtime build that §8.3 pins for Windows and checks its SHA-256, and fills `dist/windows/` with `Photostacker.exe`, `onnxruntime.dll` and ONNX Runtime's licence files. It needs the Visual Studio Build Tools' "Desktop development with C++" workload with the Windows SDK.
 
 ### 11.2 CI
 Not written yet. It is to run fmt, clippy `-D warnings`, cargo-deny (licences, advisories, bans), and `cargo nextest run --workspace` with a release build of the UI, on Linux, Windows and macOS.
 
-**Licence allow-list:** MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, Zlib, Unicode-3.0, MPL-2.0, BSL-1.0 (the Windows clipboard crates under arboard), OFL-1.1 (fonts), and named LGPL exceptions: rawler (LGPL-2.1), libheif and libde265 (LGPL-3.0). Any GPL crate fails.
+**Licence allow-list** (`deny.toml`, checked by `just deny`): MIT, Apache-2.0, Apache-2.0 WITH LLVM-exception, BSD-3-Clause, ISC, Zlib, Unicode-3.0, MPL-2.0, BSL-1.0 (the Windows clipboard crates under arboard), OFL-1.1 and Ubuntu-font-1.0 (egui's default fonts), CDLA-Permissive-2.0 (webpki-roots, the root certificates of the model downloads), and one named LGPL exception: rawler (LGPL-2.1). libheif-rs and libheif-sys are MIT; the C libraries they build and link, libheif and libde265 (LGPL-3.0), are not crates, so cargo-deny does not see them (§3, §11.3). Any other licence fails, GPL among them. The check covers the four targets the releases ship (Linux x64, Windows x64, macOS on Apple silicon and on Intel), with the default features and the development dependencies.
 
 ### 11.3 Release
 Not written yet. On `v*` tags equal to the ui crate's version, it is to build deb and AppImage (Ubuntu 22.04), NSIS, MSI and zip (Windows) and dmg (macOS arm64), publish them with SHA-256 checksums and build-provenance attestations, keep the mirrored ONNX files in a one-off `models-v1` release (hashes as in §8.1), and ship `THIRD-PARTY-LICENSES.md` (cargo-about) in the packages and the About box.

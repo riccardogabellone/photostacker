@@ -22,7 +22,7 @@ The app's data (the job database, the models, the logs) lives in the platform's 
 
 ## Environment
 
-- **Toolchain:** stable Rust, 1.99 or later (`rust-version` in [Cargo.toml](Cargo.toml)), [just](https://github.com/casey/just) and [cargo-nextest](https://nexte.st).
+- **Toolchain:** stable Rust, 1.99 or later (`rust-version` in [Cargo.toml](Cargo.toml)), [just](https://github.com/casey/just), [cargo-nextest](https://nexte.st) and [cargo-deny](https://github.com/EmbarkStudios/cargo-deny) (`cargo install cargo-deny --locked`).
 - **Linux packages:** `sudo apt install build-essential cmake pkg-config libde265-dev libegl1 zenity`.
   - `zenity` gives the app its file dialogs where there is no XDG desktop portal; without either, the app says that no file dialog is available.
   - `libimage-exiftool-perl` is needed only to regenerate the EXIF golden file. ExifTool is never a build or run-time dependency.
@@ -44,6 +44,7 @@ just clippy                   # cargo clippy --workspace --all-targets -- -D war
 just test                     # cargo nextest run --workspace
 just test -E 'test(model::)'  # extra arguments go to nextest
 just test --no-default-features  # the same tests without ml and heic
+just deny                     # cargo deny check: licences, advisories, bans and sources (deny.toml); needs the network
 
 PHOTOSTACKER_DATA_DIR=<scratch> just run          # the desktop app, release build
 just run-cli --help                                # the CLI, release build; arguments go to the binary
@@ -77,7 +78,7 @@ node scripts/standins/standins.mjs --photocraft <folder>/photocraft-cli.exe  # t
 - After start-up, the UI thread never calls the engine and does no file I/O: both go through the backend thread.
 - Record each UI design choice in `crates/ui/DESIGN.md`. Colours come from `theme::Palette` only, and every interactive widget names itself (`WidgetInfo`).
 - The EXIF and MakerNote reader is the project's own: do not add exiftool, exiftool-rs, kamadak-exif or nom-exif.
-- Licence: MIT. No GPL dependency. LGPL is allowed only for `rawler` (2.1) and libheif/libde265 (3.0) through `libheif-rs`.
+- Licence: MIT. No GPL dependency. LGPL is allowed only for `rawler` (2.1) and libheif/libde265 (3.0) through `libheif-rs`. `just deny` checks the licences, the advisories, the banned crates and the sources against [deny.toml](deny.toml): run it when a dependency is added or updated.
 - Code ported from another project keeps its notice: a section with the original licence in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), and a header in the file that holds the port.
 - Code, comments, docs and commit messages are in English.
 
