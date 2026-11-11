@@ -41,8 +41,8 @@ use std::sync::LazyLock;
 
 use image::RgbImage;
 use libheif_rs::{
-    ColorSpace, DecodingOptions, HeifContext, HeifError, HeifErrorCode, ImageHandle, ItemId,
-    LibHeif, RgbChroma, StreamReader,
+    ColorSpace, CompressionFormat, DecodingOptions, HeifContext, HeifError, HeifErrorCode,
+    ImageHandle, ItemId, LibHeif, RgbChroma, StreamReader,
 };
 
 use super::{DecodeError, FullImage, ImageSource, Probe, Samples};
@@ -51,6 +51,34 @@ use crate::imageops;
 
 /// libheif's global state, initialised once (`heif_init`) and never torn down.
 static LIBHEIF: LazyLock<LibHeif> = LazyLock::new(LibHeif::new);
+
+/// What this build's libheif is, for a report of the build (`photostacker-cli
+/// info`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeifCodecs {
+    /// libheif's version, `major.minor.patch`.
+    pub version: String,
+    /// The ids of its HEVC decoders, in libheif's order of preference
+    /// (`libde265`).
+    pub hevc_decoders: Vec<String>,
+}
+
+/// The most decoders of one format asked of libheif; it has a handful.
+const MAX_DECODERS: usize = 16;
+
+/// libheif's version and its HEVC decoders.
+pub fn codecs() -> HeifCodecs {
+    let [major, minor, patch] = LIBHEIF.version();
+    let hevc_decoders = LIBHEIF
+        .decoder_descriptors(MAX_DECODERS, Some(CompressionFormat::Hevc))
+        .iter()
+        .map(|decoder| decoder.id().to_owned())
+        .collect();
+    HeifCodecs {
+        version: format!("{major}.{minor}.{patch}"),
+        hevc_decoders,
+    }
+}
 
 /// The prefix some writers put between the offset and the TIFF header.
 const EXIF_PREFIX: &[u8] = b"Exif\0\0";
@@ -366,7 +394,6 @@ mod tests {
 
     use chrono::NaiveDate;
     use image::Rgb;
-    use libheif_rs::CompressionFormat;
 
     use super::*;
     use crate::decode::{ColourHint, thumbnail};
@@ -648,10 +675,19 @@ mod tests {
     }
 
     #[test]
+    fn codecs_name_libheif_s_version_and_its_hevc_decoder() {
+        let codecs = codecs();
+        let [major, minor, patch] = LIBHEIF.version();
+        assert_eq!(codecs.version, format!("{major}.{minor}.{patch}"));
+        assert_eq!(major, 1, "{codecs:?}");
+        assert_eq!(codecs.hevc_decoders, ["libde265"]);
+    }
+
+    #[test]
     fn hevc_decoder_is_built_in_and_no_gpl_encoder_is() {
         // libde265 comes from the system (`libde265-dev`): libheif-sys only builds libheif.
         let hevc: Vec<String> = LIBHEIF
-            .decoder_descriptors(16, Some(CompressionFormat::Hevc))
+            .decoder_descriptors(MAX_DECODERS, Some(CompressionFormat::Hevc))
             .iter()
             .map(|d| d.id().to_owned())
             .collect();

@@ -18,7 +18,7 @@ use ort::session::Session;
 use ort::value::Tensor;
 
 use super::install::hash_copy;
-use super::runtime::{library_path, library_problem};
+use super::runtime::{environment_library, library_problem};
 use super::{ModelError, ModelSpec};
 use crate::guard;
 
@@ -47,7 +47,7 @@ impl Embedder {
     /// Loads the model file at `path` as the model `spec`. The file must be
     /// the registry's (its SHA-256 is checked first, else
     /// [`ModelError::HashMismatch`]). ONNX Runtime missing or failing to
-    /// load ([`library_path`]), or refusing the model, gives
+    /// load ([`environment_library`]), or refusing the model, gives
     /// [`ModelError::Runtime`].
     pub fn load(spec: &ModelSpec, path: &Path) -> Result<Embedder, ModelError> {
         let actual = hash_copy(File::open(path)?, io::sink())?;
@@ -164,12 +164,12 @@ fn session(environment: &Environment, path: &Path) -> ort::Result<Session> {
 }
 
 /// The process's one ONNX Runtime environment (ort allows no second), made
-/// on first use from [`library_path`]. A failure is kept too: the library
-/// is looked for once per run.
-fn environment() -> Result<Environment, ModelError> {
+/// on first use from [`environment_library`]. A failure is kept too: the
+/// library is looked for once per run.
+pub(super) fn environment() -> Result<Environment, ModelError> {
     static ENVIRONMENT: OnceLock<Result<Environment, String>> = OnceLock::new();
     ENVIRONMENT
-        .get_or_init(|| create_environment(&library_path()))
+        .get_or_init(|| create_environment(environment_library()))
         .clone()
         .map_err(ModelError::Runtime)
 }
@@ -269,7 +269,7 @@ mod tests {
     /// Whether ONNX Runtime's library is there to run models; without it a
     /// test that needs it prints why it is skipped.
     fn onnx_runtime_present() -> bool {
-        let library = library_path();
+        let library = environment_library();
         let present = library.is_file();
         if !present {
             println!("skipped: ONNX Runtime not found at {}", library.display());

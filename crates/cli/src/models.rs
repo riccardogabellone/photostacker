@@ -4,15 +4,14 @@
 
 #[cfg(feature = "ml")]
 use std::cell::Cell;
-use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, anyhow};
+use anyhow::anyhow;
 use clap::Subcommand;
 use photostacker_core::AppDirs;
 use photostacker_core::models::{self, MODELS, ModelSpec};
 
-use crate::Failure;
+use crate::{Failure, print_lines};
 
 /// The `models` subcommands.
 #[derive(Subcommand)]
@@ -54,18 +53,6 @@ pub(crate) fn models(command: &ModelsCommand) -> Result<(), Failure> {
             Ok(())
         }
     }
-}
-
-/// Prints each of `lines` to stdout; a stdout that is closed is a failure,
-/// not a panic.
-fn print_lines(lines: &[String]) -> Result<(), Failure> {
-    let mut stdout = io::stdout().lock();
-    lines
-        .iter()
-        .try_for_each(|line| writeln!(stdout, "{line}"))
-        .and_then(|()| stdout.flush())
-        .context("cannot write to stdout")
-        .map_err(Failure::Runtime)
 }
 
 /// The app's models folder.

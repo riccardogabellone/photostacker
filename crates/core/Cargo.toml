@@ -16,7 +16,7 @@ heic = ["dep:libheif-rs"]
 # ONNX Runtime is (`models::runtime`) and the embedder on it
 # (`models::embed`); without it the registry still
 # lists them, and none can be downloaded, imported or run.
-ml = ["dep:sha2", "dep:ureq", "dep:ort"]
+ml = ["dep:sha2", "dep:ureq", "dep:ort", "dep:libloading"]
 
 [dependencies]
 blake3.workspace = true
@@ -31,6 +31,8 @@ flate2.workspace = true
 # Only the still codecs; a missing codec fails at run time (Unsupported), not at compile time.
 image = { workspace = true, features = ["jpeg", "png", "tiff"] }
 libheif-rs = { workspace = true, features = ["embedded-libheif"], optional = true }
+# The version of the loaded ONNX Runtime (`models::runtime::loaded_version`).
+libloading = { workspace = true, optional = true }
 # Runs the models of Stage 3 (`models::embed`).
 ort = { workspace = true, optional = true }
 # The per-file pool of `analyze`; rawler already depends on it.

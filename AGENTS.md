@@ -51,6 +51,7 @@ just run-cli run <input> -o <scratch>/stacks       # group a folder and write it
 just run-cli run <input> --dry-run --plan <scratch>/plan.json  # group only; without --plan the plan goes to stdout
 just run-cli run <input> --db <scratch>/jobs.db --no-ml        # keep the job in a database; no visual check
 PHOTOSTACKER_DATA_DIR=<scratch> just run-cli models download dinov2-small  # also list, import, remove
+PHOTOSTACKER_DATA_DIR=<scratch> just run-cli info  # the HEIC decoder, the ONNX Runtime loaded and its version, the data folder
 
 just ort                      # once, on Linux x64 and macOS: the ONNX Runtime pinned for the system, which the model tests need
 just screenshot <out.png> <screen> [dark|light] [width] [height]  # one screen of the real window; an unknown screen lists them all

@@ -65,6 +65,10 @@ sha2 = "0.11"
 # §8.3); nothing links it at build time. No ndarray: tensors are (shape,
 # Vec<f32>).
 ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "load-dynamic", "api-17"] }
+# Reads the version of the ONNX Runtime library ort has loaded, through a
+# second handle to it (`models::runtime::loaded_version`); ort keeps its own
+# handle private. The version ort itself uses, so it adds no copy to the tree.
+libloading = "0.8"
 
 # UI (crates/ui). One egui version for every egui crate (crates/ui/DESIGN.md).
 # Members pick the renderer and platform features (crates/ui/Cargo.toml).

@@ -570,7 +570,7 @@ mod tests {
     fn args_of(argv: &[&str]) -> RunArgs {
         match Cli::try_parse_from(argv).unwrap().command {
             Command::Run(args) => args,
-            Command::Models(_) => unreachable!("a run"),
+            Command::Models(_) | Command::Info => unreachable!("a run"),
         }
     }
 

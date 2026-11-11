@@ -980,6 +980,104 @@ fn models_remove_of_a_missing_model_succeeds() {
         .stdout("");
 }
 
+/// The four lines `info` prints with the app's data in `data` and `env` set
+/// for the child, which must end with status 0 and print nothing on stderr.
+fn info_lines(data: &Path, env: &[(&str, &Path)]) -> Vec<String> {
+    let mut command = photostacker_in(data);
+    for (name, value) in env {
+        command.env(name, value);
+    }
+    let output = command
+        .arg("info")
+        .assert()
+        .success()
+        .stderr("")
+        .get_output()
+        .clone();
+    let lines: Vec<String> = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(str::to_owned)
+        .collect();
+    assert_eq!(lines.len(), 4, "{lines:?}");
+    lines
+}
+
+/// `info` names the tool, the HEIC decoder, the visual check's runtime and the
+/// data folder, in that order, and creates nothing: not even the data folder.
+#[test]
+fn info_names_the_tool_and_its_parts() {
+    let root = tempfile::tempdir().unwrap();
+    let data = root.path().join("data");
+
+    let lines = info_lines(&data, &[]);
+
+    assert_eq!(
+        lines[0],
+        format!("photostacker-cli {}", env!("CARGO_PKG_VERSION"))
+    );
+    if cfg!(feature = "heic") {
+        assert!(lines[1].starts_with("heic: libheif "), "{lines:?}");
+        assert!(lines[1].ends_with(", HEVC decoder libde265"), "{lines:?}");
+    } else {
+        assert_eq!(lines[1], "heic: not built in");
+    }
+    if cfg!(feature = "ml") {
+        assert!(lines[2].starts_with("visual check: "), "{lines:?}");
+    } else {
+        assert_eq!(lines[2], "visual check: not built in");
+    }
+    assert_eq!(lines[3], format!("data: {}", data.display()));
+    assert!(!data.exists(), "info created {}", data.display());
+    assert!(entries(root.path()).is_empty());
+}
+
+/// Without ONNX Runtime the visual check's line says why it cannot run, and
+/// `info` still succeeds.
+#[cfg(feature = "ml")]
+#[test]
+fn info_says_why_the_visual_check_cannot_run() {
+    let root = tempfile::tempdir().unwrap();
+    let nowhere = root.path().join("nowhere").join("libonnxruntime.so");
+
+    let lines = info_lines(root.path(), &[("ORT_DYLIB_PATH", &nowhere)]);
+
+    assert_eq!(
+        lines[2],
+        format!(
+            "visual check: ONNX Runtime not found at {}",
+            nowhere.display()
+        )
+    );
+}
+
+/// With ONNX Runtime installed, the line names its version and the library
+/// that was loaded.
+#[cfg(feature = "ml")]
+#[test]
+fn info_names_the_loaded_runtime() {
+    let library = photostacker_core::models::runtime::library_path();
+    if !library.is_file() {
+        println!("skipped: ONNX Runtime not found at {}", library.display());
+        return;
+    }
+    let data = tempfile::tempdir().unwrap();
+
+    let lines = info_lines(data.path(), &[]);
+
+    assert!(
+        lines[2].starts_with("visual check: ONNX Runtime 1."),
+        "{lines:?}"
+    );
+    assert!(lines[2].contains(" at "), "{lines:?}");
+    if library.is_absolute() {
+        assert!(
+            lines[2].ends_with(&format!(" at {}", library.display())),
+            "{lines:?}"
+        );
+    }
+}
+
 /// Ctrl+C while the stacks are written cancels the job: the run says so,
 /// exits 1, and leaves no unfinished stack nor spill file behind.
 #[cfg(unix)]

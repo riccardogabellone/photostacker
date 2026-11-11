@@ -439,7 +439,8 @@ URLs: `https://huggingface.co/Xenova/<repo>/resolve/<revision>/onnx/model.onnx`,
     | macos | x86_64 | 1.19.2 | `onnxruntime-osx-x86_64-1.19.2.tgz` | `6536e36d7ea92e32d53dad7ddd0fdf10be5b62d1dace85a13e1295ff81e9b5d4` |
 
   - `scripts/ort.sh` (`just ort`; bash on Linux and macOS, Git Bash on Windows) downloads this system's archive once into `<cache>/<version>/<archive name>/`, checks its SHA-256, extracts it into a temporary folder and renames it into place, then prints the library's path; with `--where` it only prints the path, or nothing on a system with no pinned build. `<cache>` is `${XDG_CACHE_HOME:-~/.cache}/onnxruntime` on Linux, `~/Library/Caches/onnxruntime` on macOS and `%LOCALAPPDATA%\photostacker\onnxruntime` on Windows, where `scripts/win.ps1` installs the same build. The justfile exports `ORT_DYLIB_PATH` to the `--where` path unless already set. Model tests print `skipped: ONNX Runtime not found at …` and pass without it.
-  - One environment per process, made on first use, telemetry off.
+  - One environment per process, made on first use, telemetry off, from the library path found the first time it is asked for (a relative `ORT_DYLIB_PATH` is taken from the working folder). That path is kept for the life of the process, so anything that names the loaded library names this one.
+  - **The loaded version** (`models::runtime::loaded_version`, which `photostacker-cli info` prints) is the library's own answer, `GetVersionString` from its `OrtGetApiBase`. ort keeps its handle to the library private, so the library is opened a second time by the same path, once the environment exists. The system hands back the image it already has (one more reference to it) and runs no initialiser again, so this loads nothing.
 - **Session:** once per model, lazily, after the file's SHA-256 is checked, with ONNX Runtime's default intra-op threads (one per physical core). One batch at a time per model (`&mut`); preprocessing outside that lock. Batches of up to 8.
 - **Input/output:** resize to 224×224 (Catmull-Rom bicubic, no crop), scale to 0..1, ImageNet mean and std, CHW float32, into the first input. `last_hidden_state` must be `[batch, tokens, dims]` with the registry's `dims` (0 included), else the model is refused as the wrong shape. The embedding is the CLS row `[:, 0, :]`; a NaN or infinity in it fails the run like an ONNX Runtime error.
 - **Embeddings** are L2-normalised before storage; a zero vector stays zero.
@@ -530,6 +531,7 @@ photostacker-cli run <INPUT> [-o <OUTPUT>] [--format psd|tiff] [--recursive]
                      [--no-ml] [--model dinov2-small] [--raw-tone srgb|linear]
                      [--raw-jpeg raw|jpeg] [--plan <file.json>] [--dry-run] [--db <path>]
 photostacker-cli models list | download <id> | import <id> <file> | remove <id>
+photostacker-cli info
 ```
 
 - **`run`** confirms and writes through the engine (§4.3), one job on an engine of its own, submitted without `auto_confirm`, so it stops in Review Pending after the scan (Stage 3 included). The plan is built from the stored analysis. A dry run prints or writes it and ends. Otherwise the plan file and the `error:` lines come first, then `confirm_all` and `write`, with `WriteOptions::default()`. The plan's config has `auto_confirm` set when the run writes. A failed group is reported and the next is written. With no group, nothing is written and the output folder is neither created nor checked; the summary says `0 written`.
@@ -550,6 +552,7 @@ photostacker-cli models list | download <id> | import <id> <file> | remove <id>
   - `models import <id> <file>` (§8.2): prints the installed file; a mismatch exits 1 with nothing installed: `this file is <n> MB, <name> is <m> MB` before copying, or `… does not match <id> …` for the right size with another hash.
   - `models remove <id>` removes the folder; a model not there is no error.
   - An unknown id is a usage error (2); a model another download, import or removal holds, in any process, is busy (1). Without `ml`, `download` and `import` exit 2 with `built without ml`; `list` and `remove` work.
+- **`info`** says what this build holds, for a package's check before release and for a bug report: four lines on stdout, nothing on stderr, and exit 0 whatever it finds. It creates no folder and no file. `photostacker-cli <version>`; `heic: libheif <version>, HEVC decoder <ids, comma separated>` (`heic: not built in` without `heic`); `visual check: ONNX Runtime <version> at <path>`, the version the loaded library gives and the file the environment was made from (§8.3), or `visual check: <why>` in the words a model load would use (`ONNX Runtime not found at <path>`, the macOS sentence, the loader's reason), or `visual check: not built in` without `ml`; `data: <the app's data folder>` (§7.1), or `data: none` when there is no home folder.
 
 ## 11. Dev environment, build, CI, release
 

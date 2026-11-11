@@ -1,5 +1,6 @@
-//! Where ONNX Runtime's shared library is, and whether this system can load
-//! it (spec §8.3). Only the `ml` feature builds it.
+//! Where ONNX Runtime's shared library is, whether this system can load it,
+//! and the version of the one loaded (spec §8.3). Only the `ml` feature
+//! builds it.
 //!
 //! The library is looked at before it is loaded, so that one the system
 //! cannot load is refused in plain words, not in the system loader's: on
@@ -10,12 +11,14 @@
 
 use std::env;
 use std::env::consts::{ARCH, DLL_PREFIX, DLL_SUFFIX};
-use std::ffi::OsString;
+use std::ffi::{CStr, OsString};
 use std::fmt;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
+use super::ModelError;
 use crate::package;
 
 /// Where ONNX Runtime's shared library is loaded from: `ORT_DYLIB_PATH` when
@@ -28,6 +31,78 @@ pub fn library_path() -> PathBuf {
         .map(|exe_dir| package::library_folders(&exe_dir))
         .unwrap_or_default();
     find_library(env::var_os("ORT_DYLIB_PATH"), &folders)
+}
+
+/// The library the process's one ONNX Runtime environment is made from
+/// (`models::embed`): [`library_path`] when first asked, made absolute
+/// against the working folder, then the same for the life of the process.
+/// What names the loaded library ([`loaded_version`], `photostacker-cli
+/// info`) names this one, never a later look. Asking loads nothing.
+pub fn environment_library() -> &'static Path {
+    static LIBRARY: OnceLock<PathBuf> = OnceLock::new();
+    LIBRARY.get_or_init(|| {
+        let library = library_path();
+        std::path::absolute(&library).unwrap_or(library)
+    })
+}
+
+/// ONNX Runtime's own version string (`1.31.1`), as the loaded library says
+/// it. The process's environment is made first, as a model load makes it,
+/// so a library that cannot be used gives the same error a model load would
+/// ([`ModelError::Runtime`]: not found, needing a newer macOS, or the
+/// loader's reason).
+pub fn loaded_version() -> Result<String, ModelError> {
+    super::embed::environment()?;
+    let library = environment_library();
+    version_of_loaded(library).map_err(|reason| {
+        ModelError::Runtime(format!(
+            "ONNX Runtime at {} did not give its version: {reason}",
+            library.display()
+        ))
+    })
+}
+
+/// `OrtGetApiBase`, the entry point ONNX Runtime's library exports, as
+/// `onnxruntime_c_api.h` declares it (`ORT_API_CALL`: the system's calling
+/// convention) and `ort::sys` does too.
+type GetApiBase = unsafe extern "system" fn() -> *const ort::sys::OrtApiBase;
+
+/// The version string of the ONNX Runtime library at `library`, which the
+/// process's environment was made from and so is loaded already. It is
+/// opened a second time by that same path: the system hands back the image
+/// it has loaded (one more reference to it), so nothing is loaded again.
+/// `ort` keeps its own handle to itself, and its API table does not hold the
+/// version, only the API base does.
+fn version_of_loaded(library: &Path) -> Result<String, String> {
+    // SAFETY: the environment exists and was made from `library`, so the
+    // library at that path is ONNX Runtime and this process has loaded it:
+    // opening it again returns the loaded image and runs no initialiser a
+    // second time. `OrtGetApiBase` is its documented entry point, of the
+    // signature `GetApiBase` gives; `OrtApiBase`'s layout is `ort::sys`'s,
+    // generated from the same header. The base pointer and the string
+    // pointer are checked for null before they are read. The string is a
+    // static of the library, which stays loaded for the life of the process
+    // because `ort` holds it; besides, `handle` keeps it loaded until the end
+    // of this block, and the string is copied into a `String` (checked as
+    // UTF-8) before `handle` is dropped.
+    unsafe {
+        let handle = libloading::Library::new(library).map_err(|error| error.to_string())?;
+        let get_api_base = handle
+            .get::<GetApiBase>(b"OrtGetApiBase")
+            .map_err(|_| "it has no OrtGetApiBase".to_owned())?;
+        let base = get_api_base();
+        if base.is_null() {
+            return Err("OrtGetApiBase gave a null pointer".into());
+        }
+        let version = ((*base).GetVersionString)();
+        if version.is_null() {
+            return Err("GetVersionString gave a null pointer".into());
+        }
+        CStr::from_ptr(version)
+            .to_str()
+            .map(str::to_owned)
+            .map_err(|_| "its version is not UTF-8".to_owned())
+    }
 }
 
 /// [`library_path`], given `ORT_DYLIB_PATH`'s value and the folders to look
@@ -701,5 +776,43 @@ mod tests {
             return;
         }
         assert_eq!(library_problem(&library), None, "{}", library.display());
+    }
+
+    /// The version of this system's row of the pinned builds
+    /// (`scripts/onnxruntime.tsv`), if it has one.
+    fn pinned_version() -> Option<String> {
+        let table = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/onnxruntime.tsv");
+        let text = fs::read_to_string(&table)
+            .unwrap_or_else(|error| panic!("{}: {error}", table.display()));
+        text.lines()
+            .filter(|line| !line.starts_with('#'))
+            .map(|line| line.split('\t').collect::<Vec<_>>())
+            .find(|row| row.len() > 2 && row[0] == env::consts::OS && row[1] == ARCH)
+            .map(|row| row[2].to_owned())
+    }
+
+    /// The loaded library's own answer: `1.<n>.<n>`, the version pinned for
+    /// this system when it is the library of `just ort`.
+    #[test]
+    fn the_loaded_version_is_the_library_s_own() {
+        let library = environment_library();
+        if !library.is_file() {
+            println!("skipped: ONNX Runtime not found at {}", library.display());
+            return;
+        }
+        let version = loaded_version().unwrap();
+        let numbers: Vec<&str> = version.split('.').collect();
+        assert!(
+            numbers.len() == 3
+                && numbers[0] == "1"
+                && numbers
+                    .iter()
+                    .all(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())),
+            "{version}"
+        );
+        match pinned_version() {
+            Some(pinned) => assert!(version.starts_with(&pinned), "{version} is not {pinned}"),
+            None => println!("no pinned build for {} {ARCH}", env::consts::OS),
+        }
     }
 }

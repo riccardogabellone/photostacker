@@ -20,7 +20,7 @@ use crate::{guard, imageops};
 
 mod full;
 #[cfg(feature = "heic")]
-pub(crate) mod heic;
+pub mod heic;
 mod peak;
 mod preview;
 mod raw;

@@ -70,6 +70,7 @@ photostacker-cli run <folder> --dry-run --plan plan.json   # group only, and sav
 photostacker-cli run <folder> --window 45 --hamming 12     # a longer time window, a looser match
 photostacker-cli run <folder> --no-ml           # without the visual check
 photostacker-cli models list                    # the models of the visual check: also download, import, remove
+photostacker-cli info                           # what this build holds: HEIC, ONNX Runtime, the data folder
 ```
 
 `photostacker-cli run --help` lists every option with its default.

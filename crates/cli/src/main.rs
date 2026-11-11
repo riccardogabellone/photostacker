@@ -5,6 +5,8 @@
 //!   plan of the groups.
 //! - `models` (`models.rs`) lists, downloads, imports and removes the
 //!   Stage 3 models, in the app's models folder.
+//! - `info` (`info.rs`) says what this build holds and whether the visual
+//!   check can run here; it always succeeds.
 //!
 //! Exit codes: 0 on success (per-file errors are in the plan,
 //! and named on stderr when the run writes; a skipped stack is not a
@@ -12,13 +14,15 @@
 //! it started, is cancelled, or any stack fails to be written; 130 when a
 //! second Ctrl+C ends it at once.
 
+mod info;
 mod models;
 mod run;
 
-use std::io;
+use std::io::{self, Write};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use anyhow::Context;
 use clap::{Parser, Subcommand};
 use photostacker_core::guard::install_panic_hook;
 use tracing_log::{AsLog, LogTracer, log};
@@ -58,6 +62,9 @@ enum Command {
     /// Lists, downloads, imports or removes the Stage 3 models.
     #[command(subcommand)]
     Models(ModelsCommand),
+    /// Says what this build holds: the HEIC decoder, ONNX Runtime for the
+    /// visual check, and the app's data folder.
+    Info,
 }
 
 /// Why a command did not succeed.
@@ -97,11 +104,24 @@ fn main() -> ExitCode {
             run::run(args)
         }
         Command::Models(command) => models::models(command),
+        Command::Info => info::info(),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(failure) => failure.report(),
     }
+}
+
+/// Prints each of `lines` to stdout; a stdout that is closed is a failure,
+/// not a panic.
+fn print_lines(lines: &[String]) -> Result<(), Failure> {
+    let mut stdout = io::stdout().lock();
+    lines
+        .iter()
+        .try_for_each(|line| writeln!(stdout, "{line}"))
+        .and_then(|()| stdout.flush())
+        .context("cannot write to stdout")
+        .map_err(Failure::Runtime)
 }
 
 /// Set by the first Ctrl+C: the running job or download is cancelled, and
