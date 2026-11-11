@@ -45,17 +45,17 @@ const BUSY_TIMEOUT: Duration = Duration::from_millis(5000);
 /// store, in KiB: SQLite's default.
 ///
 /// The bundled SQLite is built with `SQLITE_ENABLE_MEMORY_MANAGEMENT`
-/// (`LIBSQLITE3_FLAGS` in `.cargo/config.toml`), so
-/// the page caches of every connection of the process are one pool, as
-/// large as the sum of their sizes (spec §4.3, "What a review edit
-/// costs"). A connection that reaches its own size takes the oldest pages
-/// of the pool, whoever's they are. A connection left with fewer pages
-/// than its own size can then keep none it reads while the pool is full:
-/// it reads every page from the operating system. The writer reads every
-/// embedding at each edit, and vec0 reaches a vector by walking its chunk
-/// of 384 pages from the start, so a writer that cannot keep its pages
-/// makes an edit about 7 times slower. The writer needs no more than this:
-/// it is always at its size, so it takes the pages it needs from the pool.
+/// (`LIBSQLITE3_FLAGS` in `.cargo/config.toml`), so the page caches of
+/// every connection of the process are one pool, as large as the sum of
+/// their sizes (spec §4.3, "What a review edit costs"). A connection that
+/// reaches its own size takes the oldest pages of the pool, whoever's they
+/// are. A connection left with fewer pages than its own size can then keep
+/// none it reads while the pool is full: it reads every page from the
+/// operating system. The writer reads every embedding at each edit, and
+/// vec0 reaches a vector by walking its chunk of 384 pages from the start,
+/// so a writer that cannot keep its pages makes an edit about 7 times
+/// slower. The writer needs no more than this: it is always at its size,
+/// so it takes the pages it needs from the pool.
 const WRITER_CACHE_KIB: i64 = 2_000;
 
 /// The page cache of a read-only connection ([`Store::open_read_only`]),
