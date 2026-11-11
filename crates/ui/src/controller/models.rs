@@ -48,9 +48,14 @@ impl RuntimeCheck {
     pub fn look() -> RuntimeCheck {
         #[cfg(feature = "ml")]
         {
-            let path = models::runtime::library_path();
-            let problem = models::runtime::library_problem(&path);
-            RuntimeCheck { path, problem }
+            // The engine's environment is made from this same path, so the app names
+            // one path of the library wherever it speaks of it.
+            let path = models::runtime::environment_library();
+            let problem = models::runtime::library_problem(path);
+            RuntimeCheck {
+                path: path.to_path_buf(),
+                problem,
+            }
         }
         #[cfg(not(feature = "ml"))]
         RuntimeCheck {

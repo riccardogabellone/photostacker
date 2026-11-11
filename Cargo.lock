@@ -3418,7 +3418,7 @@ dependencies = [
  "flate2",
  "image",
  "libheif-rs",
- "libloading 0.8.9",
+ "libloading 0.9.0",
  "ort",
  "photostacker-testkit",
  "psd",

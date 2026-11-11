@@ -1052,15 +1052,19 @@ fn info_says_why_the_visual_check_cannot_run() {
 }
 
 /// With ONNX Runtime installed, the line names its version and the library
-/// that was loaded.
+/// that was loaded. The child inherits `ORT_DYLIB_PATH`, which is what is
+/// looked at: without it the child would look beside its own executable,
+/// not where this test's process would.
 #[cfg(feature = "ml")]
 #[test]
 fn info_names_the_loaded_runtime() {
-    let library = photostacker_core::models::runtime::library_path();
-    if !library.is_file() {
-        println!("skipped: ONNX Runtime not found at {}", library.display());
+    let library = std::env::var_os("ORT_DYLIB_PATH")
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from);
+    let Some(library) = library.filter(|library| library.is_file()) else {
+        println!("skipped: ORT_DYLIB_PATH is not set to an ONNX Runtime library");
         return;
-    }
+    };
     let data = tempfile::tempdir().unwrap();
 
     let lines = info_lines(data.path(), &[]);
@@ -1069,13 +1073,11 @@ fn info_names_the_loaded_runtime() {
         lines[2].starts_with("visual check: ONNX Runtime 1."),
         "{lines:?}"
     );
-    assert!(lines[2].contains(" at "), "{lines:?}");
-    if library.is_absolute() {
-        assert!(
-            lines[2].ends_with(&format!(" at {}", library.display())),
-            "{lines:?}"
-        );
-    }
+    let absolute = std::path::absolute(&library).unwrap();
+    assert!(
+        lines[2].ends_with(&format!(" at {}", absolute.display())),
+        "{lines:?}"
+    );
 }
 
 /// Ctrl+C while the stacks are written cancels the job: the run says so,

@@ -21,27 +21,24 @@ use std::sync::OnceLock;
 use super::ModelError;
 use crate::package;
 
-/// Where ONNX Runtime's shared library is loaded from: `ORT_DYLIB_PATH` when
-/// set and not empty; else the platform's file name (`libonnxruntime.so`,
+/// Where ONNX Runtime's shared library is loaded from, the one path of it
+/// that the process's environment (`models::embed`), the app's look before
+/// its first frame and every message name: `ORT_DYLIB_PATH` when set and not
+/// empty; else the platform's file name (`libonnxruntime.so`,
 /// `onnxruntime.dll`, `libonnxruntime.dylib`) in the first of the package's
 /// library folders that holds it ([`package::library_folders`]); else that
 /// name beside the executable, so a message names the first place looked in.
-pub fn library_path() -> PathBuf {
-    let folders = package::exe_dir()
-        .map(|exe_dir| package::library_folders(&exe_dir))
-        .unwrap_or_default();
-    find_library(env::var_os("ORT_DYLIB_PATH"), &folders)
-}
-
-/// The library the process's one ONNX Runtime environment is made from
-/// (`models::embed`): [`library_path`] when first asked, made absolute
-/// against the working folder, then the same for the life of the process.
-/// What names the loaded library ([`loaded_version`], `photostacker-cli
-/// info`) names this one, never a later look. Asking loads nothing.
+/// It is made absolute against the working folder, and found once: then the
+/// same for the life of the process, so what names the loaded library
+/// ([`loaded_version`], `photostacker-cli info`) names the one the
+/// environment was made from. Asking loads nothing.
 pub fn environment_library() -> &'static Path {
     static LIBRARY: OnceLock<PathBuf> = OnceLock::new();
     LIBRARY.get_or_init(|| {
-        let library = library_path();
+        let folders = package::exe_dir()
+            .map(|exe_dir| package::library_folders(&exe_dir))
+            .unwrap_or_default();
+        let library = find_library(env::var_os("ORT_DYLIB_PATH"), &folders);
         std::path::absolute(&library).unwrap_or(library)
     })
 }
@@ -105,7 +102,8 @@ fn version_of_loaded(library: &Path) -> Result<String, String> {
     }
 }
 
-/// [`library_path`], given `ORT_DYLIB_PATH`'s value and the folders to look
+/// [`environment_library`] before it is made absolute, given
+/// `ORT_DYLIB_PATH`'s value and the folders to look
 /// in, in order.
 fn find_library(ort_dylib_path: Option<OsString>, folders: &[PathBuf]) -> PathBuf {
     if let Some(path) = ort_dylib_path.filter(|path| !path.is_empty()) {
@@ -770,12 +768,12 @@ mod tests {
     /// tests run on.
     #[test]
     fn the_library_at_ort_dylib_path_declares_no_newer_macos() {
-        let library = library_path();
+        let library = environment_library();
         if !library.is_file() {
             println!("skipped: ONNX Runtime not found at {}", library.display());
             return;
         }
-        assert_eq!(library_problem(&library), None, "{}", library.display());
+        assert_eq!(library_problem(library), None, "{}", library.display());
     }
 
     /// The version of this system's row of the pinned builds
@@ -791,8 +789,8 @@ mod tests {
             .map(|row| row[2].to_owned())
     }
 
-    /// The loaded library's own answer: `1.<n>.<n>`, the version pinned for
-    /// this system when it is the library of `just ort`.
+    /// The loaded library's own answer: `1.<n>.<n>`, exactly the version
+    /// pinned for this system when it is the library of `just ort`.
     #[test]
     fn the_loaded_version_is_the_library_s_own() {
         let library = environment_library();
@@ -811,7 +809,7 @@ mod tests {
             "{version}"
         );
         match pinned_version() {
-            Some(pinned) => assert!(version.starts_with(&pinned), "{version} is not {pinned}"),
+            Some(pinned) => assert_eq!(version, pinned),
             None => println!("no pinned build for {} {ARCH}", env::consts::OS),
         }
     }
