@@ -67,6 +67,8 @@ exceptions = [
 # No exception for HEIC: libheif-rs and libheif-sys are MIT. The libraries
 # they build and link, libheif and libde265 (LGPL-3.0), are C libraries cargo
 # does not see; spec §3 and §11.3 cover them.
+# wayland-protocols-plasma declares MIT; some protocol files inside it are
+# marked LGPL-2.1-or-later: see THIRD-PARTY-NOTICES.md.
 
 [bans]
 # Reported, not failed: most come from the window toolkit's platform crates.

@@ -1,12 +1,16 @@
 # Third-party notices
 
 This project contains code ported from, and assets taken from, the following
-third-party projects. Each section names the original files, where they live
-in this tree, and the original licence, reproduced verbatim.
+third-party projects. Each of the first three sections (Pillow, Inter,
+fastframe and ZapFast) names the original files, where they live in this tree,
+and the original licence, reproduced verbatim.
 
-Its packages also hold parts that are not in this tree, or that need more than
-a licence text. From rawler on, each section says what the part is, how it
-reaches the packages, where its source is, and where its licence text is.
+The sections after them reproduce no licence text. The imagehash section
+credits a method this project follows, from which no code is ported. The
+project's packages also hold parts that are not in this tree, or that need
+more than a licence text: from rawler on, each section says what the part is,
+how it reaches the packages, where its source is, and where its licence text
+is.
 The licence of every Rust crate built into the app and the command-line tool,
 with its text, is in `THIRD-PARTY-LICENSES.md`, which a package holds beside
 this file in its `licenses` folder (the app's About card opens that folder).
@@ -208,10 +212,10 @@ SOFTWARE.
 
 The perceptual hashes (`crates/core/src/hash.rs`) follow the published method
 of Python's imagehash (https://github.com/JohannesBuchner/imagehash, by
-Johannes Buchner, under the BSD 2-Clause licence): its pHash
-and dHash, so that a distance between two hashes means here what it means
-there. No code is ported from it; the tests compare our hashes with the ones
-it computes (`crates/core/tests/hash_parity.rs`).
+Johannes Buchner, under the BSD 2-Clause licence): its pHash and dHash, so
+that a distance between two hashes means here what it means there. No code is
+ported from it; the tests compare our hashes with the ones it computes
+(`crates/core/tests/hash_parity.rs`).
 
 ## rawler
 
@@ -222,8 +226,8 @@ version 2.1. Its text ships beside this file as `LGPL-2.1.txt`, as the Free
 Software Foundation publishes it, and in `THIRD-PARTY-LICENSES.md` as rawler's
 own copy. The version built in is the one `Cargo.lock` pins.
 
-The LGPL lets you use a changed copy of rawler with Photostacker. Photostacker's
-complete source is public under the MIT licence, at
+The LGPL lets you use a changed copy of rawler with Photostacker.
+Photostacker's complete source is public under the MIT licence, at
 https://github.com/riccardogabellone/photostacker, and builds with the
 commands its `AGENTS.md` documents, so the app can be rebuilt with your copy
 of rawler in place of the original (a `[patch.crates-io]` entry in
@@ -233,8 +237,9 @@ of rawler in place of the original (a `[patch.crates-io]` entry in
 
 HEIC and HEIF photos are decoded by libheif
 (https://github.com/strukturag/libheif), whose HEVC decoder is libde265
-(https://github.com/strukturag/libde265). Both libraries and their use are covered by the GNU Lesser General Public
-License, version 3 or (at your option) any later version. That licence is
+(https://github.com/strukturag/libde265). Both libraries and their use are
+covered by the GNU Lesser General Public License, version 3 or (at your
+option) any later version. That licence is
 written as additions to the GNU General Public License, version 3, so both
 texts ship beside this file, as the Free Software Foundation publishes them:
 `LGPL-3.0.txt` and `GPL-3.0.txt`.
@@ -251,16 +256,63 @@ in `Cargo.lock` carries (its version is the part after the `+`). libheif is
 built with libde265 as its only codec, so no codec under the GPL, such as x265
 or x264, is in the packages.
 
-The LGPL lets you use changed copies of these libraries with Photostacker. On
-Linux, libde265 is a shared library: put your copy in place of the system's
-`libde265.so.0` (or of the copy inside the AppImage), and the app loads it.
-Everywhere else they are built in: Photostacker's complete source is public
-under the MIT licence, at https://github.com/riccardogabellone/photostacker,
-and builds with the commands its `AGENTS.md` documents, so the app can be
-rebuilt with your copies in place of the originals.
+The LGPL lets you use changed copies of these libraries with Photostacker.
+Where a library is built in, the app is rebuilt with your copy in its place:
+Photostacker's complete source is public under the MIT licence, at
+https://github.com/riccardogabellone/photostacker, and builds with the
+commands its `AGENTS.md` documents. Case by case:
+
+- **libheif on Linux and macOS** is built from the source inside the
+  `libheif-sys` crate: put your libheif in a copy of that crate, and point
+  cargo at the copy with a `[patch.crates-io]` entry in `Cargo.toml`.
+- **libheif on Windows** is built from vcpkg's `libheif` port: give vcpkg your
+  libheif as that port, and build the app against it.
+- **libde265 on Linux** is the system's shared library: put your copy in place
+  of the system's `libde265.so.0` (or of the copy inside the AppImage), and
+  the app loads it, with no rebuild.
+- **libde265 on Windows and macOS** is built in: build your copy the same way
+  the project builds libde265 for that system (on Windows as vcpkg's
+  `libde265` port, on macOS as a static library), and build the app against
+  it.
 
 HEVC, the codec of HEIC photos, may be covered by patents in some countries:
 decoding it is the same grey area GIMP and ImageMagick ship with.
+
+## KDE's Wayland protocol files
+
+This section concerns the Linux packages only: the crate it is about is not
+built for Windows or macOS, nor into the command-line tool.
+
+On Linux the desktop app includes Rust code that the
+`wayland-protocols-plasma` crate (declared MIT, part of the wayland-rs
+project, https://github.com/smithay/wayland-rs) generates from KDE's Wayland
+protocol files. The crate is there for Wayland: winit, the window library under the
+app's toolkit (eframe), brings it in with its `wayland` feature. The version
+built in is the one `Cargo.lock` pins.
+
+The crate carries KDE's plasma-wayland-protocols
+(https://invent.kde.org/libraries/plasma-wayland-protocols; the crate itself
+names its mirror, https://github.com/KDE/plasma-wayland-protocols) and
+generates code from all 30 protocol files in its folder
+`plasma-wayland-protocols/src/protocols/`. Their authors mark 17 of them
+`LGPL-2.1-or-later`: `appmenu.xml`, `blur.xml`, `contrast.xml`, `dpms.xml`,
+`fake-input.xml`, `idle.xml`, `kde-lockscreen-overlay-v1.xml`, `keystate.xml`,
+`org-kde-plasma-virtual-desktop.xml`, `plasma-shell.xml`,
+`plasma-window-management.xml`, `remote-access.xml`,
+`server-decoration-palette.xml`, `server-decoration.xml`, `shadow.xml`,
+`slide.xml` and `zkde-screencast-unstable-v1.xml`. Of the other 13, ten are
+marked `MIT-CMU`, one `BSD-3-Clause` (`surface-extension.xml`), one `MIT`
+(`wayland-eglstream-controller.xml`), and one carries no licence marking
+(`fullscreen-shell.xml`). The texts of those licences are in the crate's
+`plasma-wayland-protocols/LICENSES/` folder; the LGPL-2.1's text ships beside
+this file as `LGPL-2.1.txt`.
+
+To use changed protocol files with Photostacker, rebuild the app with a copy
+of `wayland-protocols-plasma` that holds them: Photostacker's complete source
+is public under the MIT licence, at
+https://github.com/riccardogabellone/photostacker, and builds with the
+commands its `AGENTS.md` documents; a `[patch.crates-io]` entry in
+`Cargo.toml` points cargo at your copy.
 
 ## ONNX Runtime
 
@@ -294,7 +346,7 @@ at https://www.apache.org/licenses/LICENSE-2.0.
 
 The visual check's models, DINOv2 small and DINOv2 base, are Meta's DINOv2
 (https://github.com/facebookresearch/dinov2) as Xenova converted them to ONNX
-on Hugging Face, under the Apache License 2.0. They are not in the packages: the app or the command-line tool
-downloads one only when the user asks, from the addresses in the model
-registry (`crates/core/src/models/registry.rs`), or imports a file the user
-chooses.
+on Hugging Face, under the Apache License 2.0. They are not in the packages:
+the app or the command-line tool downloads one only when the user asks, from
+the addresses in the model registry (`crates/core/src/models/registry.rs`), or
+imports a file the user chooses.

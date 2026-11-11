@@ -46,7 +46,7 @@ just test                     # cargo nextest run --workspace
 just test -E 'test(model::)'  # extra arguments go to nextest
 just test --no-default-features  # the same tests without ml and heic
 just deny                     # cargo deny check: licences, advisories, bans and sources (deny.toml); needs the network
-just licences                 # the crates' licences, with their texts (about.toml), into dist/package/resources/licenses/THIRD-PARTY-LICENSES.md; offline
+just licences                 # the crates' licences, with their texts (about.toml), into dist/package/resources/licenses/THIRD-PARTY-LICENSES.md; needs the network
 
 PHOTOSTACKER_DATA_DIR=<scratch> just run          # the desktop app, release build
 just run-cli --help                                # the CLI, release build; arguments go to the binary

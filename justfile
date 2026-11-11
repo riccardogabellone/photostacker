@@ -36,18 +36,18 @@ clippy:
 test *ARGS:
     cargo nextest run --workspace "$@"
 
-# Check the dependencies' licences, advisories, bans and sources against deny.toml (spec §11.2).
 # Not part of `check`: it downloads the advisory database, and `check` works offline.
+# Check the dependencies' licences, advisories, bans and sources against deny.toml (spec §11.2).
 deny:
     cargo deny check
 
-# cargo-about (`cargo install cargo-about --locked --features cli`) reads about.toml and the
-# template in packaging/licenses. It runs offline: it reads only the crates cargo has already
-# downloaded (any build has; `cargo fetch` alone does too). Not part of `check`.
+# cargo-about (`cargo install cargo-about --locked --features cli`) reads about.toml and the template in
+# packaging/licenses. It needs the network: it fetches from GitHub the licence files that some crates
+# leave out of their package (about.toml's `git` clarifications). Not part of `check`.
 # Write the licences of the Rust crates the packages ship, with their texts, to dist/package/resources/licenses/THIRD-PARTY-LICENSES.md (spec §11.3).
 licences:
     mkdir -p dist/package/resources/licenses
-    cargo about generate --workspace --locked --offline --fail --config about.toml --output-file dist/package/resources/licenses/THIRD-PARTY-LICENSES.md packaging/licenses/about.hbs
+    cargo about generate --workspace --locked --fail --config about.toml --output-file dist/package/resources/licenses/THIRD-PARTY-LICENSES.md packaging/licenses/about.hbs
 
 # Run the desktop app in release mode; arguments go to the binary.
 run *ARGS:

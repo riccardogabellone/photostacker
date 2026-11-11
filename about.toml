@@ -45,12 +45,21 @@ workarounds = ["chrono"]
 
 # --- Crate by crate ---------------------------------------------------------
 #
-# Each clarification below names a licence file the crate ships that the tool
-# does not recognise with confidence, so that file's text, with its copyright
-# lines, ships instead of the licence's standard text. The checksum is the
-# file's SHA-256, byte for byte: a crate whose file changes no longer matches,
-# and the tool says so. Crates that ship no licence file at all get the
-# licence's standard text; the generated file says which.
+# Each clarification names the licence file whose text ships for the crate,
+# with its copyright lines, instead of the licence's standard text:
+# - `files`: a file the crate ships that the tool does not recognise with
+#   confidence;
+# - `git`: for a crate that ships none, the file in its repository (path from
+#   the repository's root) at the commit the crate was published from, which
+#   the crate's `.cargo_vcs_info.json` names. These are fetched from GitHub,
+#   so `just licences` needs the network.
+# The checksum is the file's SHA-256, byte for byte: a crate whose file changes
+# no longer matches, and the tool says so. A clarification applies to every
+# version of a crate's name: where two versions are built in and only one has
+# the file at its commit, the tool warns that the other does not match, and
+# that one keeps the standard text. Crates whose repository holds no licence
+# text get the licence's standard text; each is named at the end of this file,
+# and the generated file says which.
 
 # The RAW decoder (spec §3): the one LGPL crate, as in deny.toml.
 [rawler]
@@ -277,3 +286,381 @@ license = "MIT OR Apache-2.0"
 path = "license-mit"
 license = "MIT"
 checksum = "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+
+# The crate's own MIT text. The scan also finds the MIT template that the KDE
+# protocols inside it carry for their own licensing (LICENSES/MIT.txt, with
+# "<year> <copyright holders>" unfilled), which is no copyright notice.
+[wayland-protocols-plasma.clarify]
+license = "MIT"
+
+[[wayland-protocols-plasma.clarify.files]]
+path = "LICENSE.txt"
+checksum = "1cb6f4dee8c649f175736380495f0af0c753c87f22d50931692968bb24bf2161"
+
+# --- From the crates' repositories ----------------------------------------
+
+# AccessKit (github.com/AccessKit/accesskit): one MIT and one Apache-2.0 text at
+# the repository's root, without a copyright line of their own. The crates
+# that hold code derived from Chromium (their sources say so, and point at
+# LICENSE.chromium) are also under that file's BSD-3-Clause, which their
+# declared expression leaves out.
+
+[accesskit.clarify]
+license = "(MIT OR Apache-2.0) AND BSD-3-Clause"
+
+[[accesskit.clarify.git]]
+path = "LICENSE-MIT"
+license = "MIT"
+checksum = "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+
+[[accesskit.clarify.git]]
+path = "LICENSE-APACHE"
+license = "Apache-2.0"
+checksum = "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+
+[[accesskit.clarify.git]]
+path = "LICENSE.chromium"
+license = "BSD-3-Clause"
+checksum = "845022e0c1db1abb41a6ba4cd3c4b674ec290f3359d9d3c78ae558d4c0ed9308"
+
+[accesskit_atspi_common.clarify]
+license = "(MIT OR Apache-2.0) AND BSD-3-Clause"
+
+[[accesskit_atspi_common.clarify.git]]
+path = "LICENSE-MIT"
+license = "MIT"
+checksum = "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+
+[[accesskit_atspi_common.clarify.git]]
+path = "LICENSE-APACHE"
+license = "Apache-2.0"
+checksum = "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+
+[[accesskit_atspi_common.clarify.git]]
+path = "LICENSE.chromium"
+license = "BSD-3-Clause"
+checksum = "845022e0c1db1abb41a6ba4cd3c4b674ec290f3359d9d3c78ae558d4c0ed9308"
+
+[accesskit_consumer.clarify]
+license = "(MIT OR Apache-2.0) AND BSD-3-Clause"
+
+[[accesskit_consumer.clarify.git]]
+path = "LICENSE-MIT"
+license = "MIT"
+checksum = "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+
+[[accesskit_consumer.clarify.git]]
+path = "LICENSE-APACHE"
+license = "Apache-2.0"
+checksum = "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+
+[[accesskit_consumer.clarify.git]]
+path = "LICENSE.chromium"
+license = "BSD-3-Clause"
+checksum = "845022e0c1db1abb41a6ba4cd3c4b674ec290f3359d9d3c78ae558d4c0ed9308"
+
+[accesskit_macos.clarify]
+license = "(MIT OR Apache-2.0) AND BSD-3-Clause"
+
+[[accesskit_macos.clarify.git]]
+path = "LICENSE-MIT"
+license = "MIT"
+checksum = "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+
+[[accesskit_macos.clarify.git]]
+path = "LICENSE-APACHE"
+license = "Apache-2.0"
+checksum = "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+
+[[accesskit_macos.clarify.git]]
+path = "LICENSE.chromium"
+license = "BSD-3-Clause"
+checksum = "845022e0c1db1abb41a6ba4cd3c4b674ec290f3359d9d3c78ae558d4c0ed9308"
+
+[accesskit_windows.clarify]
+license = "(MIT OR Apache-2.0) AND BSD-3-Clause"
+
+[[accesskit_windows.clarify.git]]
+path = "LICENSE-MIT"
+license = "MIT"
+checksum = "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+
+[[accesskit_windows.clarify.git]]
+path = "LICENSE-APACHE"
+license = "Apache-2.0"
+checksum = "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+
+[[accesskit_windows.clarify.git]]
+path = "LICENSE.chromium"
+license = "BSD-3-Clause"
+checksum = "845022e0c1db1abb41a6ba4cd3c4b674ec290f3359d9d3c78ae558d4c0ed9308"
+
+[accesskit_unix.clarify]
+license = "MIT OR Apache-2.0"
+
+[[accesskit_unix.clarify.git]]
+path = "LICENSE-MIT"
+license = "MIT"
+checksum = "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+
+[[accesskit_unix.clarify.git]]
+path = "LICENSE-APACHE"
+license = "Apache-2.0"
+checksum = "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+
+[accesskit_winit.clarify]
+license = "Apache-2.0"
+
+[[accesskit_winit.clarify.git]]
+path = "LICENSE-APACHE"
+license = "Apache-2.0"
+checksum = "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+
+# egui (github.com/emilk/egui): LICENSE-MIT and LICENSE-APACHE at the root.
+# eframe 0.37.0 was published from a commit the repository has. The other
+# crates of 0.37.0 name, in their .cargo_vcs_info.json, a commit the
+# repository does not have, so they read the files at the commit the 0.37.0
+# tag points at (the release commit), which holds the same two licence files
+# as eframe's own commit.
+
+[eframe.clarify]
+license = "MIT OR Apache-2.0"
+
+[[eframe.clarify.git]]
+path = "LICENSE-MIT"
+license = "MIT"
+checksum = "95ca92f5f8ea5231f1580b3a2a799e8260af3114b900e1def5355a7f44bcf60c"
+
+[[eframe.clarify.git]]
+path = "LICENSE-APACHE"
+license = "Apache-2.0"
+checksum = "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90"
+
+[ecolor.clarify]
+license = "MIT OR Apache-2.0"
+override-git-commit = "841a328ba2dd8f6996beb7189ebb7fc00e668a2a"
+
+[[ecolor.clarify.git]]
+path = "LICENSE-MIT"
+license = "MIT"
+checksum = "95ca92f5f8ea5231f1580b3a2a799e8260af3114b900e1def5355a7f44bcf60c"
+
+[[ecolor.clarify.git]]
+path = "LICENSE-APACHE"
+license = "Apache-2.0"
+checksum = "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90"
+
+[egui.clarify]
+license = "MIT OR Apache-2.0"
+override-git-commit = "841a328ba2dd8f6996beb7189ebb7fc00e668a2a"
+
+[[egui.clarify.git]]
+path = "LICENSE-MIT"
+license = "MIT"
+checksum = "95ca92f5f8ea5231f1580b3a2a799e8260af3114b900e1def5355a7f44bcf60c"
+
+[[egui.clarify.git]]
+path = "LICENSE-APACHE"
+license = "Apache-2.0"
+checksum = "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90"
+
+[egui-wgpu.clarify]
+license = "MIT OR Apache-2.0"
+override-git-commit = "841a328ba2dd8f6996beb7189ebb7fc00e668a2a"
+
+[[egui-wgpu.clarify.git]]
+path = "LICENSE-MIT"
+license = "MIT"
+checksum = "95ca92f5f8ea5231f1580b3a2a799e8260af3114b900e1def5355a7f44bcf60c"
+
+[[egui-wgpu.clarify.git]]
+path = "LICENSE-APACHE"
+license = "Apache-2.0"
+checksum = "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90"
+
+[egui-winit.clarify]
+license = "MIT OR Apache-2.0"
+override-git-commit = "841a328ba2dd8f6996beb7189ebb7fc00e668a2a"
+
+[[egui-winit.clarify.git]]
+path = "LICENSE-MIT"
+license = "MIT"
+checksum = "95ca92f5f8ea5231f1580b3a2a799e8260af3114b900e1def5355a7f44bcf60c"
+
+[[egui-winit.clarify.git]]
+path = "LICENSE-APACHE"
+license = "Apache-2.0"
+checksum = "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90"
+
+[egui_glow.clarify]
+license = "MIT OR Apache-2.0"
+override-git-commit = "841a328ba2dd8f6996beb7189ebb7fc00e668a2a"
+
+[[egui_glow.clarify.git]]
+path = "LICENSE-MIT"
+license = "MIT"
+checksum = "95ca92f5f8ea5231f1580b3a2a799e8260af3114b900e1def5355a7f44bcf60c"
+
+[[egui_glow.clarify.git]]
+path = "LICENSE-APACHE"
+license = "Apache-2.0"
+checksum = "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90"
+
+[emath.clarify]
+license = "MIT OR Apache-2.0"
+override-git-commit = "841a328ba2dd8f6996beb7189ebb7fc00e668a2a"
+
+[[emath.clarify.git]]
+path = "LICENSE-MIT"
+license = "MIT"
+checksum = "95ca92f5f8ea5231f1580b3a2a799e8260af3114b900e1def5355a7f44bcf60c"
+
+[[emath.clarify.git]]
+path = "LICENSE-APACHE"
+license = "Apache-2.0"
+checksum = "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90"
+
+[epaint.clarify]
+license = "MIT OR Apache-2.0"
+override-git-commit = "841a328ba2dd8f6996beb7189ebb7fc00e668a2a"
+
+[[epaint.clarify.git]]
+path = "LICENSE-MIT"
+license = "MIT"
+checksum = "95ca92f5f8ea5231f1580b3a2a799e8260af3114b900e1def5355a7f44bcf60c"
+
+[[epaint.clarify.git]]
+path = "LICENSE-APACHE"
+license = "Apache-2.0"
+checksum = "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90"
+
+# objc2 (github.com/madsmtm/objc2): the older versions built in were
+# published when its root held LICENSE.txt, an MIT text ("Copyright (c) Steven
+# Sheldon"). The newer ones (block2 0.6, objc2 0.6, objc2-app-kit 0.3,
+# objc2-foundation 0.3, and the crates named at the end of this file) were
+# published when the root held only LICENSE.md, which names the licences but
+# holds no text: the tool warns that these clarifications do not match them,
+# and they keep the standard text.
+
+[block2.clarify]
+license = "MIT"
+
+[[block2.clarify.git]]
+path = "LICENSE.txt"
+license = "MIT"
+checksum = "e353f37b12aefbb9f9b29490e837cfee05d9bda70804b3562839a3285c1df1e5"
+
+[objc-sys.clarify]
+license = "MIT"
+
+[[objc-sys.clarify.git]]
+path = "LICENSE.txt"
+license = "MIT"
+checksum = "e353f37b12aefbb9f9b29490e837cfee05d9bda70804b3562839a3285c1df1e5"
+
+[objc2.clarify]
+license = "MIT"
+
+[[objc2.clarify.git]]
+path = "LICENSE.txt"
+license = "MIT"
+checksum = "e353f37b12aefbb9f9b29490e837cfee05d9bda70804b3562839a3285c1df1e5"
+
+[objc2-app-kit.clarify]
+license = "MIT"
+
+[[objc2-app-kit.clarify.git]]
+path = "LICENSE.txt"
+license = "MIT"
+checksum = "e353f37b12aefbb9f9b29490e837cfee05d9bda70804b3562839a3285c1df1e5"
+
+[objc2-foundation.clarify]
+license = "MIT"
+
+[[objc2-foundation.clarify.git]]
+path = "LICENSE.txt"
+license = "MIT"
+checksum = "e353f37b12aefbb9f9b29490e837cfee05d9bda70804b3562839a3285c1df1e5"
+
+# One crate each, the file at the root of its repository.
+
+[alloc-stdlib.clarify]
+license = "BSD-3-Clause"
+
+[[alloc-stdlib.clarify.git]]
+path = "LICENSE"
+license = "BSD-3-Clause"
+checksum = "c0c56f26d9c051cac4d200c34c84e7ae9aaa853e01a982a1df08b09931e518ae"
+
+[clipboard-win.clarify]
+license = "BSL-1.0"
+
+[[clipboard-win.clarify.git]]
+path = "LICENSE"
+license = "BSL-1.0"
+checksum = "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566"
+
+[egui_material_icons.clarify]
+license = "MIT"
+
+[[egui_material_icons.clarify.git]]
+path = "LICENSE"
+license = "MIT"
+checksum = "da852a16bd5ba877d550a6dc856f752d6d7fc3e79c9c52c2a1e0cd325f6c9e95"
+
+[profiling.clarify]
+license = "MIT OR Apache-2.0"
+
+[[profiling.clarify.git]]
+path = "LICENSE-MIT"
+license = "MIT"
+checksum = "c8167fdeeed46d3f244d3f85c5bf998ce889343691c32be2c61a8bc4b5c08333"
+
+[[profiling.clarify.git]]
+path = "LICENSE-APACHE"
+license = "Apache-2.0"
+checksum = "10d30a673cd5e9349bdc02aeb48f14b3386d27d0da32df8f0a555d4aa16aa551"
+
+[rusqlite_migration.clarify]
+license = "Apache-2.0"
+
+[[rusqlite_migration.clarify.git]]
+path = "LICENSE.txt"
+license = "Apache-2.0"
+checksum = "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+
+[spirv.clarify]
+license = "Apache-2.0"
+
+[[spirv.clarify.git]]
+path = "LICENSE"
+license = "Apache-2.0"
+checksum = "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+
+# sqlite-vec 0.1.9 was published without .cargo_vcs_info.json, so it reads its
+# files at its release tag, v0.1.9.
+
+[sqlite-vec.clarify]
+license = "MIT OR Apache-2.0"
+override-git-commit = "v0.1.9"
+
+[[sqlite-vec.clarify.git]]
+path = "LICENSE-MIT"
+license = "MIT"
+checksum = "6ce72bbe12d975bd5286e5ab0a064c069693300c47bccbc57bec18485f1621ea"
+
+[[sqlite-vec.clarify.git]]
+path = "LICENSE-APACHE"
+license = "Apache-2.0"
+checksum = "a38070a94d4afd9cd710e3ce67bd1de78097cfe1784c1f0109ac95d3c196bfdc"
+
+# --- The standard text -----------------------------------------------------
+#
+# These keep the licence's standard text: no file of theirs, in the crate or
+# in its repository at the commit it was published from, holds the text.
+# - dispatch 0.2.0 (github.com/SSheldon/rust-dispatch): the repository has no
+#   licence file, at that commit or since.
+# - From objc2's repository, published when its root held only LICENSE.md:
+#   block2 0.6, dispatch2, objc2 0.6, objc2-app-kit 0.3, objc2-core-foundation,
+#   objc2-core-graphics, objc2-encode, objc2-foundation 0.3, objc2-metal,
+#   objc2-quartz-core, objc2-uniform-type-identifiers.
