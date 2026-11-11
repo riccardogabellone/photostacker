@@ -43,7 +43,7 @@ test *ARGS:
 run *ARGS:
     cargo run --release -p photostacker-ui -- "$@"
 
-# Run the photostacker CLI in release mode; arguments go to the binary.
+# Run the command-line tool, photostacker-cli, in release mode; arguments go to the binary.
 run-cli *ARGS:
     cargo run --release -p photostacker-cli -- "$@"
 

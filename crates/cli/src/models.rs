@@ -1,4 +1,4 @@
-//! `photostacker models` (spec §8.2): the Stage 3 models in the app's models
+//! `photostacker-cli models` (spec §8.2): the Stage 3 models in the app's models
 //! folder (spec §7.1), which the GUI shares. Downloading and importing need
 //! the `ml` feature; listing and removing do not.
 
@@ -126,7 +126,7 @@ fn import(_: &ModelSpec, _: &Path) -> Result<(), Failure> {
 #[cfg(not(feature = "ml"))]
 fn without_ml() -> Failure {
     Failure::Usage(
-        "this photostacker was built without ml: it cannot download or import a model".into(),
+        "this photostacker-cli was built without ml: it cannot download or import a model".into(),
     )
 }
 

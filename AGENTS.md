@@ -9,7 +9,7 @@ Photostacker finds series of geometrically identical photos in a folder (exposur
 The design specification is [docs/design.md](docs/design.md). The code and the tests cite its sections as `spec §N`. Read the section before changing the behaviour it describes, and change the two together.
 
 - `crates/core/`: the `photostacker-core` library: discovery, EXIF, decoding, hashing, grouping, the store, the engine, the models and the writers. Everything that is not drawing or argv.
-- `crates/cli/`: the `photostacker` binary (`photostacker-cli` crate).
+- `crates/cli/`: the command-line tool: binary and crate `photostacker-cli`.
 - `crates/ui/`: the desktop app, binary `Photostacker` (`photostacker-ui` crate, egui/eframe), over the core's engine on a thread of its own. Read [crates/ui/DESIGN.md](crates/ui/DESIGN.md) before changing the UI.
   - Its tests: `tests/controller.rs` (no window), `tests/interaction.rs` (`egui_kittest`: the real widgets over a real engine, end-to-end runs included), `tests/thumbs.rs`. `tests/common/` is what they share, and `tests/screens/` the screens of the screenshot example, which `interaction.rs` draws too.
 - `crates/testkit/`: dev-only fixtures (synthetic EXIF/TIFF bytes and scenes); a dev-dependency, never published.

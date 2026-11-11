@@ -1,4 +1,4 @@
-//! The `photostacker` command line (spec §10).
+//! The `photostacker-cli` command line (spec §10).
 //!
 //! - `run` (`run.rs`) analyses a folder through the engine and writes every
 //!   proposed group as a layered file; with `--dry-run` it writes only the
@@ -42,7 +42,7 @@ const DEFAULT_LOG_FILTER: &str = "warn,rawler=off";
 
 #[derive(Parser)]
 #[command(
-    name = "photostacker",
+    name = "photostacker-cli",
     version,
     about = "Stacks photo series into layered files."
 )]

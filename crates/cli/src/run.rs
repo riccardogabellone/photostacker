@@ -1,4 +1,4 @@
-//! `photostacker run` (spec §10): one job on an engine of the CLI's own.
+//! `photostacker-cli run` (spec §10): one job on an engine of the CLI's own.
 //!
 //! The job is submitted without `auto_confirm`, so it stops in Review
 //! Pending once scanned (Stage 3 included). Its plan is then built from the
@@ -583,14 +583,14 @@ mod tests {
             ..JobConfig::new("/in".into())
         };
         assert_eq!(
-            args_of(&["photostacker", "run", "/in"]).job_config(),
+            args_of(&["photostacker-cli", "run", "/in"]).job_config(),
             JobConfig {
                 auto_confirm: true,
                 ..defaults.clone()
             }
         );
         assert_eq!(
-            args_of(&["photostacker", "run", "/in", "--dry-run"]).job_config(),
+            args_of(&["photostacker-cli", "run", "/in", "--dry-run"]).job_config(),
             defaults
         );
     }
@@ -638,7 +638,7 @@ mod tests {
     /// the app does (spec §5.2), and its help says so.
     #[test]
     fn the_window_defaults_to_30_seconds() {
-        let args = args_of(&["photostacker", "run", "/in"]);
+        let args = args_of(&["photostacker-cli", "run", "/in"]);
         assert_eq!(args.job_config().time_window_seconds, 30);
         let help = Cli::command()
             .find_subcommand_mut("run")
@@ -652,7 +652,7 @@ mod tests {
     #[test]
     fn options_override_the_job_config() {
         let args = args_of(&[
-            "photostacker",
+            "photostacker-cli",
             "run",
             "/in",
             "-o",
@@ -696,10 +696,11 @@ mod tests {
     /// `--no-ml` turns Stage 3 off, and naming a model with it is an error.
     #[test]
     fn no_ml_turns_stage_3_off() {
-        let args = args_of(&["photostacker", "run", "/in", "--no-ml"]);
+        let args = args_of(&["photostacker-cli", "run", "/in", "--no-ml"]);
         assert_eq!(args.job_config().ml_model, None);
         assert!(
-            Cli::try_parse_from(["photostacker", "run", "/in", "--no-ml", "--model", "x"]).is_err()
+            Cli::try_parse_from(["photostacker-cli", "run", "/in", "--no-ml", "--model", "x"])
+                .is_err()
         );
     }
 

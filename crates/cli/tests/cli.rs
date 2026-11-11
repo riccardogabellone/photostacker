@@ -1,4 +1,4 @@
-//! End-to-end tests of the `photostacker` binary: synthetic brackets are
+//! End-to-end tests of the `photostacker-cli` binary: synthetic brackets are
 //! written to a temporary folder and the CLI is run on them.
 
 use std::fs;
@@ -73,7 +73,7 @@ const SECOND_BRACKET: [&str; 3] = ["IMG_0004.jpg", "IMG_0005.jpg", "IMG_0006.jpg
 /// The CLI with the app data in `data` (spec §7.1), so no test touches the
 /// user's real data.
 fn photostacker_in(data: &Path) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_photostacker"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_photostacker-cli"));
     command.env(DATA_DIR_ENV, data);
     command
 }
@@ -119,6 +119,27 @@ fn read_plan(path: &Path) -> PlanV1 {
 
 fn paths(names: &[&str]) -> Vec<PathBuf> {
     names.iter().map(PathBuf::from).collect()
+}
+
+/// The tool is `photostacker-cli`: a name that differs from the app's
+/// (`Photostacker`) by more than case, so the two files can sit side by side
+/// on Windows and macOS, whose file names ignore case.
+#[test]
+fn the_tool_is_named_photostacker_cli() {
+    photostacker()
+        .arg("--version")
+        .assert()
+        .success()
+        .stdout(format!("photostacker-cli {}\n", env!("CARGO_PKG_VERSION")));
+
+    let output = photostacker()
+        .arg("--help")
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let help = String::from_utf8(output.stdout).unwrap();
+    assert!(help.contains("Usage: photostacker-cli"), "{help}");
 }
 
 #[test]
@@ -986,7 +1007,7 @@ fn ctrl_c_cancels_and_cleans_up() {
     let output = root.path().join("out");
     let data = tempfile::tempdir().unwrap();
 
-    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_photostacker"))
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_photostacker-cli"))
         .env(DATA_DIR_ENV, data.path())
         .arg("run")
         .arg(&input)

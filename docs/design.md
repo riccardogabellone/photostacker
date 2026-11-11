@@ -44,7 +44,7 @@ Photostacker replaces a slow manual Photoshop routine. All logic and UI are in R
 
 | Topic | Decision |
 |---|---|
-| App shape | A Cargo workspace: `core` library, `cli` binary, `ui` egui app. The core's API is the API. |
+| App shape | A Cargo workspace: `core` library, `cli` binary `photostacker-cli`, `ui` egui app `Photostacker`. The two names differ by more than case: Windows and macOS do not tell file names apart by case. The core's API is the API. |
 | EXIF / MakerNotes | Our own EXIF reader (§5.2) and our own MakerNote parser for the bracket tags of Canon, Nikon, Sony and Fujifilm. No exiftool, exiftool-rs (GPL), kamadak-exif or nom-exif. |
 | RAW | rawler (pure Rust, from dnglab, LGPL-2.1). |
 | HEIC/HEIF | libheif-rs with `embedded-libheif`. Its HEVC decoder libde265 comes from the build host: Windows links vcpkg's `libheif[core,libde265]` statically (never the `hevc`/x265 port); Linux links the system `libde265.so.0` (the .deb depends on `libde265-0`, the AppImage bundles it); macOS bundles the dylib. A test fails if x265 or x264 is linked. `scripts/win.ps1`, the Windows build for hand trials, builds without HEIC. |
@@ -68,7 +68,7 @@ Stage-2 hashes cannot match Python's `imagehash` bit for bit (decoders and resam
 ## 4. Architecture
 
 ### 4.1 Workspace
-- `crates/core` (`photostacker-core`, the library: everything that is not drawing or argv), `crates/cli` (`photostacker-cli`, binary `photostacker`), `crates/ui` (`photostacker-ui`, binary `Photostacker`, design in `crates/ui/DESIGN.md`), `crates/testkit` (dev-only fixtures, never published); `assets/`, `packaging/linux/` (the desktop entry, named after the app id), `scripts/`, `justfile`, `LICENSE` (MIT), `THIRD-PARTY-LICENSES.md`.
+- `crates/core` (`photostacker-core`, the library: everything that is not drawing or argv), `crates/cli` (`photostacker-cli`, binary `photostacker-cli`), `crates/ui` (`photostacker-ui`, binary `Photostacker`, design in `crates/ui/DESIGN.md`), `crates/testkit` (dev-only fixtures, never published); `assets/`, `packaging/linux/` (the desktop entry, named after the app id), `scripts/`, `justfile`, `LICENSE` (MIT), `THIRD-PARTY-LICENSES.md`.
 - Edition 2024. `core` never depends on egui or clap.
 - Features: `ml` (ort and model management) and `heic` (so contributors can build without cmake), on by default in the core; the CLI and the app have the same two, forwarding to the core's.
 
@@ -518,11 +518,11 @@ A toolbar on top, the jobs list on the left, the job in the centre, the inspecto
 ## 10. CLI
 
 ```
-photostacker run <INPUT> [-o <OUTPUT>] [--format psd|tiff] [--recursive]
-                 [--hamming 8] [--window 30] [--ml-floor 6] [--cosine <f>]
-                 [--no-ml] [--model dinov2-small] [--raw-tone srgb|linear]
-                 [--raw-jpeg raw|jpeg] [--plan <file.json>] [--dry-run] [--db <path>]
-photostacker models list | download <id> | import <id> <file> | remove <id>
+photostacker-cli run <INPUT> [-o <OUTPUT>] [--format psd|tiff] [--recursive]
+                     [--hamming 8] [--window 30] [--ml-floor 6] [--cosine <f>]
+                     [--no-ml] [--model dinov2-small] [--raw-tone srgb|linear]
+                     [--raw-jpeg raw|jpeg] [--plan <file.json>] [--dry-run] [--db <path>]
+photostacker-cli models list | download <id> | import <id> <file> | remove <id>
 ```
 
 - **`run`** confirms and writes through the engine (§4.3), one job on an engine of its own, submitted without `auto_confirm`, so it stops in Review Pending after the scan (Stage 3 included). The plan is built from the stored analysis. A dry run prints or writes it and ends. Otherwise the plan file and the `error:` lines come first, then `confirm_all` and `write`, with `WriteOptions::default()`. The plan's config has `auto_confirm` set when the run writes. A failed group is reported and the next is written. With no group, nothing is written and the output folder is neither created nor checked; the summary says `0 written`.

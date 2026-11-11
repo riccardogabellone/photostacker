@@ -7,7 +7,7 @@
 //!
 //! The model is read from `PHOTOSTACKER_MODELS_DIR`, as
 //! `<dir>/<model-id>/model.onnx` (the `models/` folder of the data folder
-//! that `photostacker models download` installed it in), and ONNX Runtime
+//! that `photostacker-cli models download` installed it in), and ONNX Runtime
 //! from `ORT_DYLIB_PATH`, which the justfile sets.
 //!
 //! Every folder is read in place, its top level only, as a job reads it:

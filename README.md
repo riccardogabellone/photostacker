@@ -64,15 +64,15 @@ The model runs on Microsoft's [ONNX Runtime](https://onnxruntime.ai) 1.31.1, whi
 ## Command line
 
 ```sh
-photostacker run <folder>                       # group the photos and write the stacks into <folder>/stacked
-photostacker run <folder> -o <output> --format tiff --recursive
-photostacker run <folder> --dry-run --plan plan.json   # group only, and save the plan
-photostacker run <folder> --window 45 --hamming 12     # a longer time window, a looser match
-photostacker run <folder> --no-ml               # without the visual check
-photostacker models list                        # the models of the visual check: also download, import, remove
+photostacker-cli run <folder>                   # group the photos and write the stacks into <folder>/stacked
+photostacker-cli run <folder> -o <output> --format tiff --recursive
+photostacker-cli run <folder> --dry-run --plan plan.json   # group only, and save the plan
+photostacker-cli run <folder> --window 45 --hamming 12     # a longer time window, a looser match
+photostacker-cli run <folder> --no-ml           # without the visual check
+photostacker-cli models list                    # the models of the visual check: also download, import, remove
 ```
 
-`photostacker run --help` lists every option with its default.
+`photostacker-cli run --help` lists every option with its default.
 
 ## Where your data is
 
