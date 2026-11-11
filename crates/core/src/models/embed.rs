@@ -541,6 +541,45 @@ mod tests {
         assert_eq!(l2_normalised(&[0.0; 3]), [0.0; 3]);
     }
 
+    /// The table of pinned ONNX Runtime builds that the scripts fetch (spec
+    /// §8.3): every row must be one this build can load. `ort`'s `api-17`
+    /// feature asks for ONNX Runtime 1.17 or later.
+    #[test]
+    fn the_pinned_onnx_runtimes_can_be_loaded_by_this_build() {
+        let table = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/onnxruntime.tsv");
+        let text = fs::read_to_string(&table)
+            .unwrap_or_else(|error| panic!("{}: {error}", table.display()));
+        let rows: Vec<Vec<&str>> = text
+            .lines()
+            .filter(|line| !line.trim().is_empty() && !line.starts_with('#'))
+            .map(|line| line.split('\t').collect())
+            .collect();
+        assert!(!rows.is_empty(), "{} pins nothing", table.display());
+
+        let mut systems = Vec::new();
+        for row in &rows {
+            let [os, arch, version, archive, sha256, _library] = row[..] else {
+                panic!("not six tab-separated columns: {row:?}");
+            };
+            assert!(
+                sha256.len() == 64
+                    && sha256
+                        .chars()
+                        .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)),
+                "not 64 lowercase hex digits: {sha256}"
+            );
+            assert!(archive.contains(version), "{archive} is not {version}");
+            let numbers: Vec<u32> = version.split('.').map(|n| n.parse().unwrap()).collect();
+            assert!(
+                numbers.len() == 3 && (numbers[0], numbers[1]) >= (1, 17),
+                "{version} is older than 1.17"
+            );
+            // The scripts take the first row of a system: a second is never used.
+            assert!(!systems.contains(&(os, arch)), "{os} {arch} twice");
+            systems.push((os, arch));
+        }
+    }
+
     #[test]
     fn the_embedder_can_be_shared_between_threads() {
         fn shareable<T: Send + Sync>() {}

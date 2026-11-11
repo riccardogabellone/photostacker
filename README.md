@@ -59,7 +59,7 @@ pwsh scripts/win.ps1                       # builds dist/windows/Photostacker.ex
 
 ### The visual check
 
-The model runs on Microsoft's [ONNX Runtime](https://onnxruntime.ai) 1.31.1, which is loaded when the check first runs, not linked into the app. On Linux x64, `just ort` downloads and verifies it once. Elsewhere, put the library beside the executable or set `ORT_DYLIB_PATH` to it. Without the library the app and the tool work as before, and the visual check is skipped.
+The model runs on Microsoft's [ONNX Runtime](https://onnxruntime.ai), which is loaded when the check first runs, not linked into the app: 1.31.1, or 1.19.2 on Intel Macs. On Linux x64 and macOS, `just ort` downloads and verifies it once. Elsewhere, put the library beside the executable or set `ORT_DYLIB_PATH` to it. Without the library the app and the tool work as before, and the visual check is skipped.
 
 ## Command line
 

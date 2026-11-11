@@ -8,8 +8,9 @@
 # `rustup update stable-x86_64-pc-windows-msvc` brings it up to date; the machine's
 # default toolchain is left alone), with Stage 3
 # (`ml`) and without HEIC, and puts it in `<repo>\dist\windows\` beside Microsoft's
-# ONNX Runtime 1.31.1 (`onnxruntime.dll`, which the app looks for beside its executable,
-# spec §8.3) and that runtime's licence files.
+# ONNX Runtime (`onnxruntime.dll`, which the app looks for beside its executable,
+# spec §8.3), in the version that scripts\onnxruntime.tsv pins for Windows x64, and that
+# runtime's licence files.
 #
 # The MSVC toolchain links with the Visual Studio Build Tools' "Desktop development with
 # C++" workload: the MSVC compiler and linker, and the Windows SDK. Without the SDK, rustc
@@ -18,7 +19,8 @@
 #
 # It only builds: the tests have been run on Linux only so far, through `just`
 # (AGENTS.md). The build goes into %LOCALAPPDATA%\photostacker\cargo-target
-# and ONNX Runtime into %LOCALAPPDATA%\photostacker\onnxruntime\1.31.1, never into the
+# and ONNX Runtime into %LOCALAPPDATA%\photostacker\onnxruntime\<version> (where
+# scripts/ort.sh puts it too, so the two share one download), never into the
 # repository, which the script changes only under dist\; cargo also writes to its own home
 # (%USERPROFILE%\.cargo: the registry of the crates it downloads), outside the repository
 # too. Cargo.lock is used as it is (`--locked`). CARGO_TARGET_DIR is set for the build only:
@@ -37,11 +39,28 @@ $ProgressPreference = 'SilentlyContinue'
 
 $Toolchain = 'stable-x86_64-pc-windows-msvc'
 
-# Microsoft's ONNX Runtime release for Windows x64, pinned (spec §8.3).
-$OrtVersion = '1.31.1'
+# The version and SHA-256 of Microsoft's ONNX Runtime release for Windows x64: the
+# `windows x86_64` row of scripts\onnxruntime.tsv, the table of pinned builds that
+# scripts/ort.sh reads too (spec §8.3).
+function Get-OnnxRuntimePin {
+    $table = Join-Path $PSScriptRoot 'onnxruntime.tsv'
+    foreach ($line in Get-Content -LiteralPath $table) {
+        if ($line -match '^\s*(#|$)') {
+            continue
+        }
+        $fields = $line -split "`t"
+        if ($fields.Count -eq 6 -and $fields[0] -eq 'windows' -and $fields[1] -eq 'x86_64') {
+            return [pscustomobject]@{ Version = $fields[2]; Sha256 = $fields[4] }
+        }
+    }
+    throw "$table pins no ONNX Runtime build for windows x86_64"
+}
+
+$OrtPin = Get-OnnxRuntimePin
+$OrtVersion = $OrtPin.Version
 $OrtFolder = "onnxruntime-win-x64-$OrtVersion"
 $OrtUrl = "https://github.com/microsoft/onnxruntime/releases/download/v$OrtVersion/$OrtFolder.zip"
-$OrtSha256 = '5869e26bb25314375f2d5ef1877e3ea06b1543d6c710e6e4a1ec2f7177ab4b2c'
+$OrtSha256 = $OrtPin.Sha256
 
 $Repo = Split-Path -Parent $PSScriptRoot
 $DataRoot = Join-Path $env:LOCALAPPDATA 'photostacker'

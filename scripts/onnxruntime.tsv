@@ -1,0 +1,10 @@
+# Microsoft's ONNX Runtime builds that Photostacker loads at run time, one per system (spec §8.3).
+# scripts/ort.sh and scripts/win.ps1 read it; a test in crates/core/src/models/embed.rs checks it.
+# Tab-separated: os (uname -s, as linux, macos or windows), arch (uname -m, as x86_64 or aarch64), version,
+# archive at https://github.com/microsoft/onnxruntime/releases/download/v<version>/<archive>, its sha256,
+# and the library's path inside the folder the archive unpacks to (the archive's name without .tgz or .zip).
+# Microsoft builds no Intel macOS release after 1.23.2, and 1.19.2 is the newest that runs on macOS 11.
+linux	x86_64	1.31.1	onnxruntime-linux-x64-1.31.1.tgz	c849e36a1ef3e22d4ff217b9d1ce4a3cf5b9467b975610913ae959ad5b16bdc9	lib/libonnxruntime.so
+windows	x86_64	1.31.1	onnxruntime-win-x64-1.31.1.zip	5869e26bb25314375f2d5ef1877e3ea06b1543d6c710e6e4a1ec2f7177ab4b2c	lib/onnxruntime.dll
+macos	aarch64	1.31.1	onnxruntime-osx-arm64-1.31.1.tgz	2e1344a1926ee50eb25b38153cb6992c3567515aef0e677a1a520a1798896d6f	lib/libonnxruntime.dylib
+macos	x86_64	1.19.2	onnxruntime-osx-x86_64-1.19.2.tgz	6536e36d7ea92e32d53dad7ddd0fdf10be5b62d1dace85a13e1295ff81e9b5d4	lib/libonnxruntime.dylib

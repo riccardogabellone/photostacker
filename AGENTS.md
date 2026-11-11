@@ -15,7 +15,7 @@ The design specification is [docs/design.md](docs/design.md). The code and the t
 - `crates/testkit/`: dev-only fixtures (synthetic EXIF/TIFF bytes and scenes); a dev-dependency, never published.
 - `assets/`: the font, the icons, the logo's sources ([assets/logo/AGENTS.md](assets/logo/AGENTS.md)) and the README's screenshot.
 - `packaging/linux/`: the desktop entry, named after the app id.
-- `scripts/`: the Windows build ([scripts/win.ps1](scripts/win.ps1)), the stand-in readers ([scripts/standins/](scripts/standins/)), and the scripts that fetch the public camera files and generate the tests' golden files.
+- `scripts/`: the Windows build ([scripts/win.ps1](scripts/win.ps1)), the pinned ONNX Runtime builds and the script that fetches them ([scripts/ort.sh](scripts/ort.sh)), the stand-in readers ([scripts/standins/](scripts/standins/)), and the scripts that fetch the public camera files and generate the tests' golden files.
 - `docs/`: the specification, the [history](docs/history.md), the [calibration](docs/calibration.md) of the thresholds, the [checks in other programs](docs/photoshop-checks.md) and the [EXIF coverage](docs/exif-fixture-coverage.md).
 
 The app's data (the job database, the models, the logs) lives in the platform's data folder, and its thumbnails in the cache folder (spec §7.1). `PHOTOSTACKER_DATA_DIR` moves both, for the app and the CLI alike: set it to a scratch folder for every run you start while developing, so a real user's data is never touched.
@@ -30,7 +30,7 @@ The app's data (the job database, the models, the logs) lives in the platform's 
 - **macOS:** nothing has been built there yet.
 - **A checkout on a slow or shared drive** (a Windows drive seen from WSL, a network share): put `CARGO_TARGET_DIR=<a folder on the local disk>` in a `.env` file beside the `justfile`. The recipes load it, and it is not committed. Never let two systems build into one target folder.
 - **Line endings** are LF everywhere ([.gitattributes](.gitattributes)): the `justfile` and the shell scripts break on CRLF.
-- **ONNX Runtime** (core feature `ml`, on by default) is not linked at build time: the embedder loads Microsoft's official 1.31.1 shared library at run time, from `ORT_DYLIB_PATH` or from beside the executable (spec §8.3). On Linux x64, run `just ort` once: it downloads and verifies the library into the user's cache folder, and the `justfile` points `ORT_DYLIB_PATH` at it unless you set your own. Without the library, the tests that run a model print `skipped: ONNX Runtime not found at …` and pass. `cargo … --no-default-features` builds without `ml`; the CLI's `models download` and `models import` then exit 2 with "built without ml".
+- **ONNX Runtime** (core feature `ml`, on by default) is not linked at build time: the embedder loads Microsoft's official shared library at run time, from `ORT_DYLIB_PATH` or from beside the executable (spec §8.3). The version and SHA-256 of each system's build are pinned in one table, [scripts/onnxruntime.tsv](scripts/onnxruntime.tsv), which every script that fetches one reads: 1.31.1, and 1.19.2 on Intel macOS. On Linux x64 and macOS, run `just ort` once: it calls `scripts/ort.sh`, which downloads and verifies the library into the user's cache folder, and the `justfile` points `ORT_DYLIB_PATH` at it unless you set your own. Without the library, the tests that run a model print `skipped: ONNX Runtime not found at …` and pass. `cargo … --no-default-features` builds without `ml`; the CLI's `models download` and `models import` then exit 2 with "built without ml".
 - **HEIC** (core feature `heic`, on by default): `libheif-sys` builds libheif with cmake but links its codecs from the system, enabling every one cmake finds. libde265 is the HEVC decoder. Never install `libx265-dev` or `libx264-dev` on a build host: libheif would link those GPL encoders, and a test fails if it does. Without the feature, HEIC files are reported as "built without heic".
 
 ## Setup and commands
@@ -52,7 +52,7 @@ just run-cli run <input> --dry-run --plan <scratch>/plan.json  # group only; wit
 just run-cli run <input> --db <scratch>/jobs.db --no-ml        # keep the job in a database; no visual check
 PHOTOSTACKER_DATA_DIR=<scratch> just run-cli models download dinov2-small  # also list, import, remove
 
-just ort                      # once, on Linux x64: ONNX Runtime 1.31.1, which the model tests need
+just ort                      # once, on Linux x64 and macOS: the ONNX Runtime pinned for the system, which the model tests need
 just screenshot <out.png> <screen> [dark|light] [width] [height]  # one screen of the real window; an unknown screen lists them all
 just screenshot assets/screenshots/ui.png review dark              # the README's screenshot, on synthetic photos only
 just ps-samples --bigtiff     # the sample set for the checks in other programs, into dist/ps-check (docs/photoshop-checks.md)

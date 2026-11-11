@@ -420,18 +420,19 @@ URLs: `https://huggingface.co/Xenova/<repo>/resolve/<revision>/onnx/model.onnx`,
 
 ### 8.3 Inference
 - **Runtime:** `ort` 2.0.0-rc.15 (`std`, `load-dynamic`, `api-17`), CPU execution provider.
-  - Nothing links ONNX Runtime at build time; the embedder loads Microsoft's official ONNX Runtime **1.31.1** shared library (MIT) from `ORT_DYLIB_PATH` when set, else beside the executable: `libonnxruntime.so`, `onnxruntime.dll`, `libonnxruntime.dylib`. Every package ships it there with its `LICENSE` and `ThirdPartyNotices.txt`.
+  - Nothing links ONNX Runtime at build time; the embedder loads Microsoft's official ONNX Runtime shared library (MIT), in the version pinned for the system (below), from `ORT_DYLIB_PATH` when set, else beside the executable: `libonnxruntime.so`, `onnxruntime.dll`, `libonnxruntime.dylib`. Every package ships it there with its `LICENSE` and `ThirdPartyNotices.txt`.
   - ort's prebuilt static build needs glibc ≥ 2.38 and GCC 13's libstdc++, newer than the release host, Ubuntu 22.04; Microsoft's manylinux build runs there. The CLI has no ONNX Runtime entry in `ldd`; `dlopen` happens when a model is first loaded.
   - Without the library, loading fails with an error ("ONNX Runtime not found at …", or the loader's reason), never a panic, and Stage 3 is skipped. The app and the CLI run without it. It is looked for once per run.
-  - Pinned SHA-256 of Microsoft's archives (`https://github.com/microsoft/onnxruntime/releases/download/v1.31.1/<archive>`):
+  - **Pinned builds,** one per system, in `scripts/onnxruntime.tsv`, which every script that fetches ONNX Runtime reads. Linux, Windows and macOS on Apple silicon load **1.31.1**. macOS on Intel loads **1.19.2**: Microsoft publishes no Intel macOS build after 1.23.2, and 1.19.2 is the newest one that runs on macOS 11. `api-17` loads any ONNX Runtime from 1.17 on, and a test checks every row against that floor. Each archive is at `https://github.com/microsoft/onnxruntime/releases/download/v<version>/<archive>`; it unpacks to a folder named after it, without `.tgz` or `.zip`, and the library is in that folder's `lib/`.
 
-    | archive | sha256 |
-    |---|---|
-    | `onnxruntime-linux-x64-1.31.1.tgz` | `c849e36a1ef3e22d4ff217b9d1ce4a3cf5b9467b975610913ae959ad5b16bdc9` |
-    | `onnxruntime-win-x64-1.31.1.zip` | `5869e26bb25314375f2d5ef1877e3ea06b1543d6c710e6e4a1ec2f7177ab4b2c` |
-    | `onnxruntime-osx-arm64-1.31.1.tgz` | `2e1344a1926ee50eb25b38153cb6992c3567515aef0e677a1a520a1798896d6f` |
+    | os | arch | version | archive | sha256 |
+    |---|---|---|---|---|
+    | linux | x86_64 | 1.31.1 | `onnxruntime-linux-x64-1.31.1.tgz` | `c849e36a1ef3e22d4ff217b9d1ce4a3cf5b9467b975610913ae959ad5b16bdc9` |
+    | windows | x86_64 | 1.31.1 | `onnxruntime-win-x64-1.31.1.zip` | `5869e26bb25314375f2d5ef1877e3ea06b1543d6c710e6e4a1ec2f7177ab4b2c` |
+    | macos | aarch64 | 1.31.1 | `onnxruntime-osx-arm64-1.31.1.tgz` | `2e1344a1926ee50eb25b38153cb6992c3567515aef0e677a1a520a1798896d6f` |
+    | macos | x86_64 | 1.19.2 | `onnxruntime-osx-x86_64-1.19.2.tgz` | `6536e36d7ea92e32d53dad7ddd0fdf10be5b62d1dace85a13e1295ff81e9b5d4` |
 
-  - `just ort` downloads the Linux archive once into a cache folder (`onnxruntime/1.31.1/`), checks it, extracts into a temporary folder and renames it into place; the justfile exports `ORT_DYLIB_PATH` to its `lib/libonnxruntime.so` unless already set. Model tests print `skipped: ONNX Runtime not found at …` and pass without it.
+  - `scripts/ort.sh` (`just ort`; bash on Linux and macOS, Git Bash on Windows) downloads this system's archive once into `<cache>/<version>/<archive name>/`, checks its SHA-256, extracts it into a temporary folder and renames it into place, then prints the library's path; with `--where` it only prints the path, or nothing on a system with no pinned build. `<cache>` is `${XDG_CACHE_HOME:-~/.cache}/onnxruntime` on Linux, `~/Library/Caches/onnxruntime` on macOS and `%LOCALAPPDATA%\photostacker\onnxruntime` on Windows, where `scripts/win.ps1` installs the same build. The justfile exports `ORT_DYLIB_PATH` to the `--where` path unless already set. Model tests print `skipped: ONNX Runtime not found at …` and pass without it.
   - One environment per process, made on first use, telemetry off.
 - **Session:** once per model, lazily, after the file's SHA-256 is checked, with ONNX Runtime's default intra-op threads (one per physical core). One batch at a time per model (`&mut`); preprocessing outside that lock. Batches of up to 8.
 - **Input/output:** resize to 224×224 (Catmull-Rom bicubic, no crop), scale to 0..1, ImageNet mean and std, CHW float32, into the first input. `last_hidden_state` must be `[batch, tokens, dims]` with the registry's `dims` (0 included), else the model is refused as the wrong shape. The embedding is the CLS row `[:, 0, :]`; a NaN or infinity in it fails the run like an ONNX Runtime error.
@@ -552,7 +553,7 @@ photostacker-cli models list | download <id> | import <id> <file> | remove <id>
 - **ONNX Runtime** is not needed to build; it is loaded at run time (§8.3). `just ort` fetches it for the tests.
 - **Features** `ml` and `heic`, on by default in the core, the CLI and the app. Without `ml`, `models download` and `models import` exit 2 with "built without ml"; without `heic` no cmake or libde265 is needed, and HEIC files are reported as "built without heic".
 - **Recipes** (`justfile`): `check` (fmt, clippy `-D warnings`, nextest), `run`, `run-cli`, `screenshot <out.png> <screen> [dark|light] [width] [height]` (one named screen of the real window, 1360 × 820 by default, saved as a PNG), `ort`, `calibrate-ml` (§12.4), `ps-samples` (§12.5).
-- **Windows hand-trial build:** `pwsh scripts/win.ps1` builds the app with the MSVC toolchain without HEIC (`--no-default-features --features ml`), fetches ONNX Runtime 1.31.1 for Windows and checks it against §8.3, and fills `dist/windows/` with `Photostacker.exe`, `onnxruntime.dll` and ONNX Runtime's licence files. It needs the Visual Studio Build Tools' "Desktop development with C++" workload with the Windows SDK.
+- **Windows hand-trial build:** `pwsh scripts/win.ps1` builds the app with the MSVC toolchain without HEIC (`--no-default-features --features ml`), fetches the ONNX Runtime build that §8.3 pins for Windows and checks its SHA-256, and fills `dist/windows/` with `Photostacker.exe`, `onnxruntime.dll` and ONNX Runtime's licence files. It needs the Visual Studio Build Tools' "Desktop development with C++" workload with the Windows SDK.
 
 ### 11.2 CI
 Not written yet. It is to run fmt, clippy `-D warnings`, cargo-deny (licences, advisories, bans), and `cargo nextest run --workspace` with a release build of the UI, on Linux, Windows and macOS.
