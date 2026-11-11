@@ -1002,7 +1002,7 @@ mod tests {
             installer: None,
             runtime: RuntimeCheck {
                 path: PathBuf::from("/opt/onnxruntime/lib/libonnxruntime.so"),
-                found: true,
+                problem: None,
             },
         })
         .unwrap();

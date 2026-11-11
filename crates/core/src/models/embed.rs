@@ -6,11 +6,9 @@
 //! 0..1, normalised with the ImageNet mean and std, as CHW float32; the
 //! embedding is the CLS token of `last_hidden_state`, L2-normalised.
 
-use std::env;
-use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
 use std::fs::File;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Mutex, OnceLock, PoisonError};
 
 use image::RgbImage;
@@ -20,6 +18,7 @@ use ort::session::Session;
 use ort::value::Tensor;
 
 use super::install::hash_copy;
+use super::runtime::{library_path, library_problem};
 use super::{ModelError, ModelSpec};
 use crate::guard;
 
@@ -164,21 +163,6 @@ fn session(environment: &Environment, path: &Path) -> ort::Result<Session> {
     Session::builder(environment)?.commit_from_file(path)
 }
 
-/// Where ONNX Runtime's shared library is loaded from: `ORT_DYLIB_PATH` when
-/// set, else the platform's file name (`libonnxruntime.so`,
-/// `onnxruntime.dll`, `libonnxruntime.dylib`) beside the executable, where
-/// every package ships it (spec §8.3).
-pub fn library_path() -> PathBuf {
-    if let Some(path) = env::var_os("ORT_DYLIB_PATH").filter(|path| !path.is_empty()) {
-        return PathBuf::from(path);
-    }
-    let name = format!("{DLL_PREFIX}onnxruntime{DLL_SUFFIX}");
-    env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(|folder| folder.join(&name)))
-        .unwrap_or_else(|| PathBuf::from(name))
-}
-
 /// The process's one ONNX Runtime environment (ort allows no second), made
 /// on first use from [`library_path`]. A failure is kept too: the library
 /// is looked for once per run.
@@ -191,12 +175,13 @@ fn environment() -> Result<Environment, ModelError> {
 }
 
 /// Loads ONNX Runtime from `library` and makes the environment, with
-/// telemetry off. A missing or unloadable library is an error, never a
-/// panic: ort reports a failed load as an error, and a panic inside it is
-/// caught as a backstop.
+/// telemetry off. A library that [`library_problem`] refuses (missing, or
+/// needing a newer macOS) is not loaded; one that fails to load is an error
+/// too, never a panic: ort reports a failed load as an error, and a panic
+/// inside it is caught as a backstop.
 fn create_environment(library: &Path) -> Result<Environment, String> {
-    if !library.is_file() {
-        return Err(format!("ONNX Runtime not found at {}", library.display()));
+    if let Some(problem) = library_problem(library) {
+        return Err(problem.refusal(library));
     }
     let created = guard::catch(|| {
         ort::init_from(library)

@@ -10,7 +10,7 @@ use photostacker_core::models::url_host;
 use photostacker_core::write::format_ev;
 use photostacker_core::{EngineError, Stage};
 
-use crate::controller::MlState;
+use crate::controller::{LibraryProblem, MlState, RuntimeCheck};
 
 /// One mebibyte, the unit sizes are shown in.
 const MIB: u64 = 1 << 20;
@@ -233,6 +233,22 @@ pub fn ml_state_text(state: &MlState) -> String {
     }
 }
 
+/// What the app says of the visual check, wherever it says that ONNX Runtime is missing,
+/// when the library is there but needs a newer macOS than this one: `The visual check needs
+/// macOS 14.0 or later on this Mac.` `None` for any other state, which keeps its own words.
+pub fn needs_macos_text(state: &MlState) -> Option<String> {
+    let MlState::NoRuntime(RuntimeCheck {
+        problem: Some(LibraryProblem::NeedsMacos { needed, .. }),
+        ..
+    }) = state
+    else {
+        return None;
+    };
+    Some(format!(
+        "The visual check needs macOS {needed} or later on this Mac."
+    ))
+}
+
 /// A size in bytes as whole mebibytes, rounded to the nearest, written `MB` as file
 /// managers do: `84 MB`.
 pub fn mib(bytes: u64) -> String {
@@ -367,9 +383,18 @@ mod tests {
         assert_eq!(download_percent(0, 0), 0);
         assert_eq!(download_percent(u64::MAX, u64::MAX), 100);
         let id = "dinov2-small";
+        let missing = RuntimeCheck {
+            path: "/x".into(),
+            problem: Some(LibraryProblem::Missing),
+        };
+        let needs_macos = RuntimeCheck {
+            problem: Some(needs_macos_14_on_13_6()),
+            ..missing.clone()
+        };
         for (state, text) in [
             (MlState::NotBuilt, "ML unavailable"),
-            (MlState::NoRuntime("/x".into()), "ML unavailable"),
+            (MlState::NoRuntime(missing), "ML unavailable"),
+            (MlState::NoRuntime(needs_macos), "ML unavailable"),
             (MlState::Off, "ML off"),
             (MlState::Missing(id), "ML: no model"),
             (MlState::Downloading { id, percent: 43 }, "ML 43 %"),
@@ -377,6 +402,38 @@ mod tests {
         ] {
             assert_eq!(ml_state_text(&state), text);
         }
+    }
+
+    /// A library that needs macOS 14.0, on macOS 13.6.
+    fn needs_macos_14_on_13_6() -> LibraryProblem {
+        let version = |major, minor| crate::controller::OsVersion {
+            major,
+            minor,
+            patch: 0,
+        };
+        LibraryProblem::NeedsMacos {
+            needed: version(14, 0),
+            running: version(13, 6),
+        }
+    }
+
+    #[test]
+    fn a_library_for_a_newer_macos_is_said_in_one_sentence() {
+        let check = |problem| {
+            MlState::NoRuntime(RuntimeCheck {
+                path: "/Applications/Photostacker.app/Contents/Frameworks/libonnxruntime.dylib"
+                    .into(),
+                problem: Some(problem),
+            })
+        };
+        assert_eq!(
+            needs_macos_text(&check(needs_macos_14_on_13_6())).as_deref(),
+            Some("The visual check needs macOS 14.0 or later on this Mac.")
+        );
+        // Every other state keeps its own words.
+        assert_eq!(needs_macos_text(&check(LibraryProblem::Missing)), None);
+        assert_eq!(needs_macos_text(&MlState::Off), None);
+        assert_eq!(needs_macos_text(&MlState::NotBuilt), None);
     }
 
     #[test]

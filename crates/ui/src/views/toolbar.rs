@@ -10,7 +10,7 @@ use egui_material_icons::icons::{
 
 use crate::{
     controller::{Controller, MlState, View},
-    format::ml_state_text,
+    format::{ml_state_text, needs_macos_text},
     identity::APP_NAME,
     prefs::ThemeChoice,
     theme::{self, Palette},
@@ -50,11 +50,15 @@ pub fn show(ui: &mut egui::Ui, controller: &mut Controller, logo: &TextureHandle
 }
 
 /// The state of the visual check as a chip that is a button, named by its text: `ML off`,
-/// `ML ready`, `ML 43 %`, `ML: no model`, `ML unavailable`.
+/// `ML ready`, `ML 43 %`, `ML: no model`, `ML unavailable`. Its hover says what it does,
+/// after why the check cannot run when the library needs a newer macOS.
 fn ml_chip(ui: &mut egui::Ui, state: &MlState) -> egui::Response {
     let palette = theme::palette(ui.ctx());
-    widgets::chip_button(ui, &ml_state_text(state), ml_dot(palette, state))
-        .on_hover_text(ML_CHIP_HINT)
+    let hint = match needs_macos_text(state) {
+        Some(why) => format!("{why}\n{ML_CHIP_HINT}"),
+        None => ML_CHIP_HINT.to_owned(),
+    };
+    widgets::chip_button(ui, &ml_state_text(state), ml_dot(palette, state)).on_hover_text(hint)
 }
 
 /// The colour of the ML chip's dot: positive when ready, the accent while it downloads,

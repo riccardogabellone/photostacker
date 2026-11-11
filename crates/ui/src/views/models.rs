@@ -12,7 +12,7 @@ use egui_material_icons::icons::ICON_WARNING;
 use photostacker_core::engine::{ModelActivity, ModelView};
 
 use crate::controller::{Controller, MlState, ModelFailure, Question};
-use crate::format::{download_percent, mib};
+use crate::format::{download_percent, mib, needs_macos_text};
 use crate::prefs::FormDefaults;
 use crate::theme;
 use crate::views::fields::similarity_field;
@@ -88,12 +88,14 @@ fn content(
             *action = Some(Action::Enable(on));
         }
         ui.add(Label::new(RichText::new(WHAT_IT_DOES).color(palette.secondary)).wrap());
-        if let MlState::NoRuntime(path) = state {
+        if let MlState::NoRuntime(check) = state {
             ui.add_space(4.0);
-            let text = format!(
-                "ONNX Runtime was not found at {}, so the visual check cannot run.",
-                path.display()
-            );
+            let text = needs_macos_text(state).unwrap_or_else(|| {
+                format!(
+                    "ONNX Runtime was not found at {}, so the visual check cannot run.",
+                    check.path.display()
+                )
+            });
             warning(ui, &text);
         }
         let active = controller.active_model().id;

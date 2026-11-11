@@ -20,12 +20,12 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use common::{
-    DroppedPath, FAILED_REASON, FakeInstaller, FakePlatform, Gate, HeldEmbedder, NEAR, OpenOnDrop,
-    TIME_WINDOW, bracket_folder, click, controller, data_dir, drop_folder, harness,
-    harness_embedding, harness_installing, harness_revealing, harness_with, options, place_model,
-    psd_layer_names, raw_bracket_folder, review_folder, run_until, run_until_drawn,
-    shown_layer_names, store_brackets, store_lone_photos, write_ambiguous_stack,
-    write_bracket_folder, write_spaced_shots,
+    DroppedPath, FAILED_REASON, FakeInstaller, FakePlatform, Gate, HeldEmbedder, NEAR, NEEDS_MACOS,
+    OpenOnDrop, TIME_WINDOW, bracket_folder, click, controller, data_dir, drop_folder, harness,
+    harness_embedding, harness_installing, harness_revealing, harness_with, harness_with_options,
+    options, place_model, psd_layer_names, raw_bracket_folder, review_folder, run_until,
+    run_until_drawn, runtime_needing_macos, shown_layer_names, store_brackets, store_lone_photos,
+    write_ambiguous_stack, write_bracket_folder, write_spaced_shots,
 };
 use eframe::egui::{
     self, Key, Modifiers, ThemePreference, ViewportId,
@@ -3902,6 +3902,87 @@ fn turning_the_switch_on_downloads_nothing() {
         "a choice or a job downloaded something"
     );
     assert!(harness.state().controller().question().is_none());
+}
+
+/// Draws frames, 5 ms apart, until a text painted is `text`, whole.
+fn run_until_painted_whole(harness: &mut Harness<'static, App>, text: &str) {
+    let deadline = Instant::now() + TIMEOUT;
+    while !painted_texts(harness).iter().any(|painted| painted == text) {
+        assert!(
+            Instant::now() < deadline,
+            "{text:?} was never painted whole"
+        );
+        thread::sleep(Duration::from_millis(5));
+        harness.step();
+    }
+}
+
+/// Whether anything on screen, painted or named, says that ONNX Runtime is missing.
+fn says_missing(harness: &Harness<'static, App>) -> bool {
+    ["not found", "is missing"]
+        .iter()
+        .any(|words| painted(harness, words) || harness.query_by_label_contains(words).is_some())
+}
+
+/// A library that needs a newer macOS is said in one sentence wherever the app says that
+/// ONNX Runtime is missing: on hover the ML chip (before what it does) and the status bar,
+/// which keep their words, the new-job form and the models' card; never as missing.
+#[test]
+fn a_library_that_needs_a_newer_macos_says_so() {
+    let (_data, dirs) = data_dir();
+    let mut harness = harness_with_options(&dirs, Arc::new(|| {}), |options| {
+        options.runtime = runtime_needing_macos();
+    });
+    assert!(chip(&harness, "ML unavailable"));
+    let status = harness.query_by_role_and_label(Role::Label, "ML unavailable");
+    assert!(status.is_some());
+    if !cfg!(feature = "ml") {
+        // A build without the visual check has no library to need anything.
+        assert!(harness.query_by_label_contains("macOS").is_none());
+        return;
+    }
+    assert!(!painted(&harness, NEEDS_MACOS));
+
+    // The chip's hover, then the status bar's.
+    harness
+        .get_by_role_and_label(Role::Button, "ML unavailable")
+        .hover();
+    run_until_painted_whole(
+        &mut harness,
+        &format!("{NEEDS_MACOS}\nThe visual check of new jobs: open its settings"),
+    );
+    harness
+        .get_by_role_and_label(Role::Label, "ML unavailable")
+        .hover();
+    run_until_painted_whole(&mut harness, NEEDS_MACOS);
+    assert!(!says_missing(&harness));
+    // Away from both, it goes.
+    harness.get_by_label("New job").hover();
+    let deadline = Instant::now() + TIMEOUT;
+    while painted(&harness, NEEDS_MACOS) {
+        assert!(Instant::now() < deadline, "the status bar's hover stayed");
+        harness.step();
+    }
+
+    // The new-job form says it in place of its sentence.
+    harness.state_mut().controller_mut().open_new_job(None);
+    harness.step();
+    harness.get_by_label(NEEDS_MACOS).scroll_to_me();
+    for _ in 0..4 {
+        harness.step();
+    }
+    assert!(painted(&harness, NEEDS_MACOS));
+    assert!(!says_missing(&harness));
+    click(&mut harness, "Cancel new job");
+
+    // So does the models' card, after its warning icon.
+    open_the_models(&mut harness);
+    harness.get_by_label(NEEDS_MACOS).scroll_to_me();
+    for _ in 0..4 {
+        harness.step();
+    }
+    assert!(painted(&harness, NEEDS_MACOS));
+    assert!(!says_missing(&harness));
 }
 
 #[test]

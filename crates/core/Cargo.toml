@@ -12,8 +12,9 @@ default = ["heic", "ml"]
 # HEIC/HEIF decoding and EXIF through libheif (LGPL-3.0), built by cmake;
 # without it HEIC files are found but report "built without heic".
 heic = ["dep:libheif-rs"]
-# Stage 3's models: their download and import (`models::install`) and the
-# embedder on ONNX Runtime (`models::embed`); without it the registry still
+# Stage 3's models: their download and import (`models::install`), where
+# ONNX Runtime is (`models::runtime`) and the embedder on it
+# (`models::embed`); without it the registry still
 # lists them, and none can be downloaded, imported or run.
 ml = ["dep:sha2", "dep:ureq", "dep:ort"]
 

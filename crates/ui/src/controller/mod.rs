@@ -36,7 +36,7 @@ use form::Submissions;
 pub use form::{Field, JobForm};
 use jobs::Jobs;
 use models::Models;
-pub use models::{MlState, ModelFailure, RuntimeCheck};
+pub use models::{LibraryProblem, MlState, ModelFailure, OsVersion, RuntimeCheck};
 pub use reveal::{REVEAL_THREAD, Reveal, reveal_in_the_background};
 use review::Thresholds;
 pub use review::{ResultCounts, Review, Selection, WriteCounts, shows_results};
@@ -52,7 +52,7 @@ pub struct StartOptions {
     pub embedder: Option<Arc<dyn EmbedSource>>,
     /// What installs the models instead of the downloader: for tests.
     pub installer: Option<Arc<dyn ModelInstall>>,
-    /// Where ONNX Runtime was looked for, and whether it is there.
+    /// Where ONNX Runtime was looked for, and what keeps it from loading, if anything.
     pub runtime: RuntimeCheck,
 }
 

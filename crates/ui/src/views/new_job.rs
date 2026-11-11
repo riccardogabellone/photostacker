@@ -13,6 +13,7 @@ use photostacker_core::models::{self, ModelSpec};
 
 use crate::controller::form::{Field, JobForm};
 use crate::controller::{Controller, MlState};
+use crate::format::needs_macos_text;
 use crate::theme;
 use crate::views::fields::{
     CARD_GAP, column, error_line, grouping_fields, output_fields, similarity_field, subfolders,
@@ -187,7 +188,8 @@ fn check_sentence(state: &MlState, model: Option<&ModelSpec>) -> String {
             format!("{name} checks the stacks in doubt once it is installed: see Settings.")
         }
         MlState::Off => "Off: turn it on in Settings.".to_owned(),
-        MlState::NoRuntime(_) => "Off: ONNX Runtime is missing, so it cannot run.".to_owned(),
+        MlState::NoRuntime(_) => needs_macos_text(state)
+            .unwrap_or_else(|| "Off: ONNX Runtime is missing, so it cannot run.".to_owned()),
         MlState::NotBuilt => "This build has no visual check.".to_owned(),
     }
 }

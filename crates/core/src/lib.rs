@@ -19,6 +19,7 @@ pub mod imageops;
 mod lock;
 pub mod model;
 pub mod models;
+pub mod package;
 pub mod pairing;
 pub mod plan;
 pub mod store;

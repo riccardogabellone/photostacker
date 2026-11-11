@@ -11,8 +11,8 @@ use std::time::{Duration, Instant};
 
 use common::{
     FakeInstaller, FakePlatform, Gate, HeldEmbedder, NEAR, OpenOnDrop, TIME_WINDOW, bracket_folder,
-    controller, data_dir, options, review_folder, runtime_found, settle, wait_for_the_answer,
-    wait_until, write_ambiguous_stack, write_spaced_shots,
+    controller, data_dir, options, review_folder, runtime_found, runtime_needing_macos, settle,
+    wait_for_the_answer, wait_until, write_ambiguous_stack, write_spaced_shots,
 };
 use image::RgbImage;
 use photostacker_core::analyze::Stage;
@@ -29,8 +29,8 @@ use photostacker_testkit::photos::{write_bracket, write_lone_shots, write_raw_br
 use photostacker_ui::backend::{BACKEND_THREAD, Command, Request};
 use photostacker_ui::controller::form::Field;
 use photostacker_ui::controller::{
-    Controller, MlState, Notice, NoticeLevel, Question, REVEAL_THREAD, Reveal, Review,
-    RuntimeCheck, Selection, StartError, View, WriteCounts,
+    Controller, LibraryProblem, MlState, Notice, NoticeLevel, Question, REVEAL_THREAD, Reveal,
+    Review, RuntimeCheck, Selection, StartError, View, WriteCounts,
 };
 use photostacker_ui::platform::{Picked, Platform};
 use photostacker_ui::prefs::{FormDefaults, Panels, Prefs, ThemeChoice};
@@ -2420,7 +2420,7 @@ fn wait_for_the_models(controller: &mut Controller) {
 fn runtime_missing() -> RuntimeCheck {
     RuntimeCheck {
         path: PathBuf::from("/nowhere/libonnxruntime.so"),
-        found: false,
+        problem: Some(LibraryProblem::Missing),
     }
 }
 
@@ -2482,9 +2482,14 @@ fn ml_state_follows_the_switch_the_model_and_its_download() {
     // Without ONNX Runtime the check cannot run, whatever is installed and switched on.
     let controller = installing_controller(&dirs, &installer, runtime_missing());
     assert!(controller.prefs.ml_enabled);
+    assert_eq!(controller.ml_state(), MlState::NoRuntime(runtime_missing()));
+    drop(controller);
+
+    // Nor with a library that needs a newer macOS.
+    let controller = installing_controller(&dirs, &installer, runtime_needing_macos());
     assert_eq!(
         controller.ml_state(),
-        MlState::NoRuntime(runtime_missing().path)
+        MlState::NoRuntime(runtime_needing_macos())
     );
 }
 
@@ -2546,10 +2551,13 @@ fn a_new_job_names_the_active_model_only_when_ml_is_on() {
     settle(&mut controller);
     drop(controller);
 
-    // Without ONNX Runtime no job names a model.
-    let mut controller = installing_controller(&dirs, &installer, runtime_missing());
-    assert!(controller.prefs.ml_enabled);
-    assert_eq!(model_of_a_new_job(&mut controller, input.path()), none);
+    // Without ONNX Runtime no job names a model, nor with one that needs a newer macOS.
+    for runtime in [runtime_missing(), runtime_needing_macos()] {
+        let mut controller = installing_controller(&dirs, &installer, runtime);
+        assert!(controller.prefs.ml_enabled);
+        assert_eq!(model_of_a_new_job(&mut controller, input.path()), none);
+        settle(&mut controller);
+    }
 }
 
 #[test]

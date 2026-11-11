@@ -24,45 +24,92 @@ use crate::platform::Picked;
 const NO_FILE_DIALOG: &str =
     "No file dialog is available on this desktop, so a model file cannot be chosen here.";
 
-/// Where ONNX Runtime's library was looked for at start, and whether it is there. `main`
-/// looks once, before the first frame ([`RuntimeCheck::look`]); tests and the screenshots
-/// say what they want, so none depends on the library of the machine it runs on.
+#[cfg(feature = "ml")]
+pub use photostacker_core::models::runtime::{LibraryProblem, OsVersion};
+#[cfg(not(feature = "ml"))]
+pub use without_ml::{LibraryProblem, OsVersion};
+
+/// Where ONNX Runtime's library was looked for at start, and what keeps it from loading,
+/// if anything. `main` looks once, before the first frame ([`RuntimeCheck::look`]); tests
+/// and the screenshots say what they want, so none depends on the library of the machine
+/// it runs on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeCheck {
     pub path: PathBuf,
-    pub found: bool,
+    /// `None` when the library is there and nothing is known against it.
+    pub problem: Option<LibraryProblem>,
 }
 
 impl RuntimeCheck {
-    /// Looks for the library where the embedder loads it from (spec §8.3): one look at
-    /// the file system, for `main` before the first frame. A build without the `ml`
-    /// feature has none to look for.
+    /// Looks for the library where the embedder loads it from, and at what it needs (spec
+    /// §8.3): the file system's answer, and on macOS a few kilobytes of the library's
+    /// headers and the system's version file, for `main` before the first frame. A build
+    /// without the `ml` feature has no library to look for.
     pub fn look() -> RuntimeCheck {
         #[cfg(feature = "ml")]
         {
-            let path = models::embed::library_path();
-            let found = path.is_file();
-            RuntimeCheck { path, found }
+            let path = models::runtime::library_path();
+            let problem = models::runtime::library_problem(&path);
+            RuntimeCheck { path, problem }
         }
         #[cfg(not(feature = "ml"))]
         RuntimeCheck {
             path: PathBuf::new(),
-            found: false,
+            problem: Some(LibraryProblem::Missing),
         }
     }
 }
 
+/// The core's types of ONNX Runtime's check, which a build without `ml` does not have:
+/// the same shapes, so the controller, the views and the tests are written once for both
+/// builds. Without `ml` the state is `NotBuilt` before the check is asked, so these only
+/// ever hold what a test puts in them.
+#[cfg(not(feature = "ml"))]
+mod without_ml {
+    use std::fmt;
+
+    /// A version of macOS, as the core's `models::runtime::OsVersion`.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub struct OsVersion {
+        pub major: u32,
+        pub minor: u32,
+        pub patch: u32,
+    }
+
+    impl fmt::Display for OsVersion {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "{}.{}", self.major, self.minor)?;
+            if self.patch != 0 {
+                write!(f, ".{}", self.patch)?;
+            }
+            Ok(())
+        }
+    }
+
+    /// Why ONNX Runtime's library cannot be loaded, as the core's
+    /// `models::runtime::LibraryProblem`.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum LibraryProblem {
+        Missing,
+        NeedsMacos {
+            needed: OsVersion,
+            running: OsVersion,
+        },
+    }
+}
+
 /// Whether new jobs are checked by their look, and with what: the first that holds of a
-/// build without the visual check, ONNX Runtime missing, the switch off, and then the
-/// active model's state.
+/// build without the visual check, ONNX Runtime missing (or needing a newer macOS), the
+/// switch off, and then the active model's state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MlState {
     /// This build has no `ml` feature.
     NotBuilt,
     /// The switch is off.
     Off,
-    /// ONNX Runtime was not found at this path at start.
-    NoRuntime(PathBuf),
+    /// ONNX Runtime cannot be loaded, as this check at start found: it is missing, or it
+    /// needs a newer macOS.
+    NoRuntime(RuntimeCheck),
     /// The active model is not installed (also while it is imported, or its download is
     /// cancelled).
     Missing(&'static str),
@@ -173,8 +220,8 @@ impl Models {
         if !cfg!(feature = "ml") {
             return MlState::NotBuilt;
         }
-        if !self.runtime.found {
-            return MlState::NoRuntime(self.runtime.path.clone());
+        if self.runtime.problem.is_some() {
+            return MlState::NoRuntime(self.runtime.clone());
         }
         if !enabled {
             return MlState::Off;
@@ -322,7 +369,7 @@ mod tests {
     fn runtime(found: bool) -> RuntimeCheck {
         RuntimeCheck {
             path: PathBuf::from("/opt/onnxruntime/lib/libonnxruntime.so"),
-            found,
+            problem: (!found).then_some(LibraryProblem::Missing),
         }
     }
 
@@ -418,7 +465,25 @@ mod tests {
         let models = Models::new(runtime(false), vec![view(0, true, ModelActivity::Idle)]);
         assert_eq!(
             models.state(true, small),
-            MlState::NoRuntime(runtime(false).path)
+            MlState::NoRuntime(runtime(false))
         );
+        // A library that needs a newer macOS cannot run either.
+        let version = |major, minor| OsVersion {
+            major,
+            minor,
+            patch: 0,
+        };
+        let needs_macos = RuntimeCheck {
+            problem: Some(LibraryProblem::NeedsMacos {
+                needed: version(14, 0),
+                running: version(13, 6),
+            }),
+            ..runtime(true)
+        };
+        let models = Models::new(
+            needs_macos.clone(),
+            vec![view(0, true, ModelActivity::Idle)],
+        );
+        assert_eq!(models.state(true, small), MlState::NoRuntime(needs_macos));
     }
 }

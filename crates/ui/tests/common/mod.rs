@@ -32,7 +32,9 @@ use photostacker_testkit::photos::{
 };
 use photostacker_testkit::{expose, jpeg_with_exif, psd_reader, scene, shift};
 use photostacker_ui::app::App;
-use photostacker_ui::controller::{Controller, RuntimeCheck, StartOptions};
+use photostacker_ui::controller::{
+    Controller, LibraryProblem, OsVersion, RuntimeCheck, StartOptions,
+};
 use photostacker_ui::platform::{Picked, Platform};
 use photostacker_ui::wake::Waker;
 use tempfile::TempDir;
@@ -155,9 +157,32 @@ impl EmbedSource for InstalledEmbedder {
 pub fn runtime_found() -> RuntimeCheck {
     RuntimeCheck {
         path: PathBuf::from("/opt/onnxruntime/lib/libonnxruntime.so"),
-        found: true,
+        problem: None,
     }
 }
+
+/// ONNX Runtime at a made-up path inside a Mac app, there but needing macOS 14.0, on a Mac
+/// running macOS 13.6.
+pub fn runtime_needing_macos() -> RuntimeCheck {
+    let version = |major, minor| OsVersion {
+        major,
+        minor,
+        patch: 0,
+    };
+    RuntimeCheck {
+        path: PathBuf::from(
+            "/Applications/Photostacker.app/Contents/Frameworks/libonnxruntime.dylib",
+        ),
+        problem: Some(LibraryProblem::NeedsMacos {
+            needed: version(14, 0),
+            running: version(13, 6),
+        }),
+    }
+}
+
+/// What the app says of the visual check wherever ONNX Runtime needs a newer macOS, for
+/// [`runtime_needing_macos`].
+pub const NEEDS_MACOS: &str = "The visual check needs macOS 14.0 or later on this Mac.";
 
 /// Why each address of a failing [`FakeInstaller`]'s download fails.
 pub const FAILED_REASON: &str = "HTTP status 404";

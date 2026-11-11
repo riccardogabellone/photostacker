@@ -1,6 +1,7 @@
 //! The ML models of Stage 3 (spec §8): the registry and the installed files,
 //! always compiled, and behind the `ml` feature the verified download and
-//! import of a model and the embedder that runs it.
+//! import of a model, where ONNX Runtime is and whether it can be loaded, and
+//! the embedder that runs it.
 
 #[cfg(feature = "ml")]
 pub mod embed;
@@ -8,6 +9,8 @@ pub mod embed;
 pub mod install;
 mod lock;
 mod registry;
+#[cfg(feature = "ml")]
+pub mod runtime;
 
 use std::fmt;
 use std::io;

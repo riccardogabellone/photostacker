@@ -39,7 +39,10 @@ use photostacker_testkit::{Value, expose, jpeg_with_exif, scene, shift};
 use photostacker_ui::{
     app::App,
     backend::Request,
-    controller::{Controller, Question, Review, RuntimeCheck, StartError, StartOptions},
+    controller::{
+        Controller, LibraryProblem, OsVersion, Question, Review, RuntimeCheck, StartError,
+        StartOptions,
+    },
     failed_start::FailedStart,
     platform::Native,
     views::photo::DraggedPhoto,
@@ -58,8 +61,8 @@ const BROKEN_FILES: usize = 2;
 /// whose scan `hold` keeps in mid-run, the folder of a job to review through the
 /// controller's commands, a job to write, whose write `hold` may keep in mid-run,
 /// Stage 3's embeddings instead of a model, what installs the models instead of the
-/// network, whether ONNX Runtime is missing, and a model to download before the window
-/// opens.
+/// network, what keeps ONNX Runtime from loading, if anything, and a model to download
+/// before the window opens.
 #[derive(Default)]
 pub struct Prepared {
     _folders: Vec<TempDir>,
@@ -74,9 +77,10 @@ pub struct Prepared {
     write: Option<Write>,
     embedder: Option<Arc<dyn EmbedSource>>,
     installer: Option<Arc<dyn ModelInstall>>,
-    /// ONNX Runtime is missing; otherwise it is found. Either way at a made-up path, so no
-    /// screen depends on this machine's library.
-    no_runtime: bool,
+    /// What keeps ONNX Runtime from loading (missing, or needing a newer macOS); `None`
+    /// when it is found. Either way at a made-up path, so no screen depends on this
+    /// machine's library.
+    runtime_problem: Option<LibraryProblem>,
     /// A model to download through the controller, until its download is held or has
     /// failed.
     download: Option<&'static str>,
@@ -286,6 +290,13 @@ pub const SCREENS: &[Screen] = &[
         prepare: models_failed,
         setup: models_settings,
     },
+    // Settings with the visual check on, on a Mac whose ONNX Runtime needs macOS 14.0
+    // while it runs macOS 13.6; no model installed.
+    Screen {
+        name: "needs-macos",
+        prepare: models_needing_macos,
+        setup: models_settings,
+    },
 ];
 
 /// Where the screens say ONNX Runtime is, found or not.
@@ -315,8 +326,26 @@ fn models_downloading(dirs: &AppDirs) -> Result<Prepared, String> {
 fn models_failed(_dirs: &AppDirs) -> Result<Prepared, String> {
     Ok(Prepared {
         installer: Some(Arc::new(ScreenInstaller { fails: true })),
-        no_runtime: true,
+        runtime_problem: Some(LibraryProblem::Missing),
         download: Some("dinov2-small"),
+        ..Prepared::default()
+    })
+}
+
+/// The `needs-macos` screen's data: ONNX Runtime there, but needing macOS 14.0 on macOS
+/// 13.6, and nothing to download.
+fn models_needing_macos(_dirs: &AppDirs) -> Result<Prepared, String> {
+    let version = |major, minor| OsVersion {
+        major,
+        minor,
+        patch: 0,
+    };
+    Ok(Prepared {
+        installer: Some(Arc::new(ScreenInstaller { fails: false })),
+        runtime_problem: Some(LibraryProblem::NeedsMacos {
+            needed: version(14, 0),
+            running: version(13, 6),
+        }),
         ..Prepared::default()
     })
 }
@@ -1163,7 +1192,7 @@ fn failed_start_database(context: &egui::Context, _controller: Controller) -> Bo
             installer: None,
             runtime: RuntimeCheck {
                 path: PathBuf::from(RUNTIME_PATH),
-                found: true,
+                problem: None,
             },
         });
         match started {
@@ -1385,7 +1414,7 @@ pub fn start(screen: &Screen) -> Result<(TempDir, Prepared, Held, Waker), String
         installer: prepared.installer.clone(),
         runtime: RuntimeCheck {
             path: PathBuf::from(RUNTIME_PATH),
-            found: !prepared.no_runtime,
+            problem: prepared.runtime_problem,
         },
     })
     .map_err(|error| format!("the app cannot start: {error}"))?;
