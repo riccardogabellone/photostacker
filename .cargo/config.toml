@@ -1,0 +1,13 @@
+# Settings for every build of the workspace, whatever the host has installed.
+# Each [env] entry gives way to a value already in the environment.
+
+[env]
+# libheif is built by cmake (through libheif-sys), which links every codec
+# library it finds on the build host. The toolchain file hides all of them but
+# libde265, so the app links the same codecs wherever it is built; see the
+# file for how to keep it complete.
+CMAKE_TOOLCHAIN_FILE = { value = "packaging/cmake/libheif.cmake", relative = true }
+
+# The oldest macOS the app runs on. rustc, the `cc` crate and cmake read it
+# when they build for macOS; every other target ignores it.
+MACOSX_DEPLOYMENT_TARGET = "11.0"

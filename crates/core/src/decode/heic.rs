@@ -2,14 +2,16 @@
 //! 3 with `embedded-libheif` (feature `heic`).
 //!
 //! - **Build.** `libheif-sys` builds libheif itself with cmake, but not its
-//!   codecs: it turns on every codec cmake finds on the system. HEVC decoding
-//!   needs libde265, linked from the system (`libde265-dev` on Debian/Ubuntu):
-//!   the .deb depends on `libde265-0`, the AppImage and the macOS bundle ship
-//!   the shared library, and Windows links vcpkg's `libheif[core,libde265]`
-//!   statically (on MSVC `libheif-sys` ignores `embedded-libheif` and uses
-//!   vcpkg). Never `hevc` or x265: the x265 and x264 (GPL) development files
-//!   must not be on a build host, and a test checks that no encoder for either
-//!   format is linked.
+//!   codecs: it turns every codec on, and cmake would link each codec library
+//!   it finds on the build host, x265 and x264 (GPL) among them. The toolchain
+//!   file `packaging/cmake/libheif.cmake`, which `.cargo/config.toml` hands to
+//!   cmake, hides all of them but libde265, so the x265 and x264 development
+//!   files on a build host are ignored. HEVC decoding needs libde265, linked
+//!   from the system (`libde265-dev` on Debian/Ubuntu): the .deb depends on
+//!   `libde265-0`, the AppImage and the macOS bundle ship the shared library,
+//!   and Windows links vcpkg's `libheif[core,libde265]` statically (on MSVC
+//!   `libheif-sys` ignores `embedded-libheif` and uses vcpkg). Never `hevc` or
+//!   x265. A test checks that libde265 is libheif's only codec.
 //! - **Reading.** libheif reads through a [`StreamReader`] over the open file,
 //!   so it reads only what it needs: the boxes, then the image or the `Exif`
 //!   item. libheif's own file reader takes a narrow `char*` path, which on
@@ -684,25 +686,26 @@ mod tests {
     }
 
     #[test]
-    fn hevc_decoder_is_built_in_and_no_gpl_encoder_is() {
-        // libde265 comes from the system (`libde265-dev`): libheif-sys only builds libheif.
-        let hevc: Vec<String> = LIBHEIF
-            .decoder_descriptors(MAX_DECODERS, Some(CompressionFormat::Hevc))
+    fn libde265_is_the_only_codec() {
+        // libheif-sys turns every codec on, and cmake would link each codec
+        // library it finds on the build host, x265 and x264 (GPL) included;
+        // `packaging/cmake/libheif.cmake` hides all of them but libde265. Any
+        // extra codec makes a list longer than expected, so the cap on the
+        // lists' length does not matter.
+        assert_eq!(codecs().hevc_decoders, ["libde265"]);
+        let decoders: Vec<String> = LIBHEIF
+            .decoder_descriptors(MAX_DECODERS, None)
             .iter()
             .map(|d| d.id().to_owned())
             .collect();
-        assert!(
-            !hevc.is_empty(),
-            "no HEVC decoder: libheif was built without libde265"
-        );
-        // libheif-sys turns on every codec it finds, x265 and x264 (GPL) included.
-        for format in [CompressionFormat::Hevc, CompressionFormat::Avc] {
-            let encoders: Vec<String> = LIBHEIF
-                .encoder_descriptors(16, Some(format), None)
-                .iter()
-                .map(|e| e.id().to_owned())
-                .collect();
-            assert!(encoders.is_empty(), "{format:?} encoders: {encoders:?}");
-        }
+        assert_eq!(decoders, ["libde265"], "the decoders of every format");
+        let encoders: Vec<String> = LIBHEIF
+            .encoder_descriptors(MAX_DECODERS, None, None)
+            .iter()
+            .map(|e| e.id().to_owned())
+            .collect();
+        // `mask` is libheif's own encoder of mask images, built from its own
+        // source and registered whatever the build found: it needs no library.
+        assert_eq!(encoders, ["mask"], "the encoders of every format");
     }
 }

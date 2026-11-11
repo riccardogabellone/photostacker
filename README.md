@@ -37,12 +37,12 @@ Jobs are kept in a local database, so a scan or a review can be closed and picke
 
 ## Build and run
 
-You need a [Rust](https://rustup.rs) toolchain (1.99 or later), a C and C++ compiler, CMake and NASM. The recipes use [just](https://github.com/casey/just), and the tests [cargo-nextest](https://nexte.st).
+You need a [Rust](https://rustup.rs) toolchain (1.99 or later), a C and C++ compiler, and CMake. The recipes use [just](https://github.com/casey/just), and the tests [cargo-nextest](https://nexte.st).
 
 ### Linux
 
 ```sh
-sudo apt install build-essential cmake pkg-config nasm libde265-dev libegl1 zenity
+sudo apt install build-essential cmake pkg-config libde265-dev libegl1 zenity
 just run                                   # the desktop app
 just run-cli run <folder of photos>        # the command line: group and write the stacks
 ```
