@@ -47,6 +47,9 @@ fn find_library(ort_dylib_path: Option<OsString>, folders: &[PathBuf]) -> PathBu
 
 /// A version of macOS: `14.0`, `13.6.1`. Versions are ordered by their
 /// numbers, the major one first.
+///
+/// The UI's stand-in for a build without `ml` mirrors it: a change here is
+/// made there too (`crates/ui/src/controller/models.rs`, `without_ml`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct OsVersion {
     pub major: u32,
@@ -78,6 +81,9 @@ impl fmt::Display for OsVersion {
 }
 
 /// Why ONNX Runtime's library cannot be loaded, found before loading it.
+///
+/// The UI's stand-in for a build without `ml` mirrors it: a change here is
+/// made there too (`crates/ui/src/controller/models.rs`, `without_ml`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LibraryProblem {
     /// There is no file at its path.
@@ -108,13 +114,14 @@ impl LibraryProblem {
 /// without loading it: [`LibraryProblem::Missing`] when it is not a file; on
 /// macOS [`LibraryProblem::NeedsMacos`] when its minimum macOS, for this
 /// architecture, is above the running one. Otherwise `None`, also when
-/// either version cannot be read: the load is then tried, and its failure,
-/// if any, is the loader's.
+/// either version cannot be read, or the running one is `10.16`, which a
+/// process in compatibility mode reads on any newer macOS: the load
+/// is then tried, and its failure, if any, is the loader's.
 pub fn library_problem(library: &Path) -> Option<LibraryProblem> {
     if !library.is_file() {
         return Some(LibraryProblem::Missing);
     }
-    let running = running_macos()?;
+    let running = running_macos().and_then(known_macos)?;
     let needed = File::open(library)
         .ok()
         .and_then(|mut file| macos_minimum(&mut file, ARCH))?;
@@ -125,6 +132,20 @@ pub fn library_problem(library: &Path) -> Option<LibraryProblem> {
 /// `running` one.
 fn newer_macos(needed: OsVersion, running: OsVersion) -> Option<LibraryProblem> {
     (needed > running).then_some(LibraryProblem::NeedsMacos { needed, running })
+}
+
+/// The running macOS as read, unless it is `10.16`, which is unknown: a
+/// process in compatibility mode (`SYSTEM_VERSION_COMPAT=1`, or a program
+/// built against an SDK older than macOS 11) reads every macOS from 11 on as
+/// `10.16`, and a library needing 11.0 would be refused on a Mac that loads
+/// it. Unknown, nothing is refused and the load is tried.
+fn known_macos(running: OsVersion) -> Option<OsVersion> {
+    let compatibility = OsVersion {
+        major: 10,
+        minor: 16,
+        patch: 0,
+    };
+    (running != compatibility).then_some(running)
 }
 
 /// The running macOS, from the system's own version file.
@@ -261,13 +282,14 @@ fn thin_minimum(file: &mut (impl Read + Seek), start: u64, cputype: u32) -> Opti
 
 /// The minimum macOS that the first `count` load commands in `commands` say.
 /// Each command starts with its `cmd` and its `cmdsize`, which counts the
-/// whole command; a command smaller than those two words, or larger than
-/// what is left, ends the search with nothing.
+/// whole command; a command smaller than those two words, larger than what
+/// is left, or whose size is not a multiple of 8 (malformed in a 64-bit
+/// file, which the system's loader refuses), ends the search with nothing.
 fn minimum_in(mut commands: &[u8], count: u32) -> Option<OsVersion> {
     for _ in 0..count {
         let cmd = le_u32(commands, 0)?;
         let size = usize::try_from(le_u32(commands, 4)?).ok()?;
-        if size < 8 {
+        if size < 8 || !size.is_multiple_of(8) {
             return None;
         }
         let command = commands.get(..size)?;
@@ -483,6 +505,13 @@ mod tests {
             );
             assert_eq!(minimum(&file, "aarch64"), None, "cmdsize {size}");
         }
+        // A load command whose size is not a multiple of 8, which a 64-bit
+        // file never has, before the version command.
+        let file = thin(
+            CPU_TYPE_ARM64,
+            &[words(&[0x1B, 12, 0]), build_version(PLATFORM_MACOS, 14, 0)],
+        );
+        assert_eq!(minimum(&file, "aarch64"), None, "cmdsize 12");
         // A load command larger than the commands' total size.
         let file = thin(CPU_TYPE_ARM64, &[words(&[0x1B, 64, 0, 0, 0, 0])]);
         assert_eq!(minimum(&file, "aarch64"), None);
@@ -549,6 +578,13 @@ mod tests {
         assert_eq!(version(14, 0, 0).to_string(), "14.0");
         assert_eq!(version(13, 6, 1).to_string(), "13.6.1");
         assert_eq!(OsVersion::from_word(0x000D_0401), version(13, 4, 1));
+    }
+
+    #[test]
+    fn macos_10_16_is_an_unknown_running_version() {
+        assert_eq!(known_macos(version(10, 16, 0)), None);
+        assert_eq!(known_macos(version(10, 15, 7)), Some(version(10, 15, 7)));
+        assert_eq!(known_macos(version(11, 0, 0)), Some(version(11, 0, 0)));
     }
 
     #[test]

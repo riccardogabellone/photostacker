@@ -77,10 +77,10 @@ pub struct Prepared {
     write: Option<Write>,
     embedder: Option<Arc<dyn EmbedSource>>,
     installer: Option<Arc<dyn ModelInstall>>,
-    /// What keeps ONNX Runtime from loading (missing, or needing a newer macOS); `None`
-    /// when it is found. Either way at a made-up path, so no screen depends on this
-    /// machine's library.
-    runtime_problem: Option<LibraryProblem>,
+    /// Where ONNX Runtime is and what keeps it from loading (missing, or needing a newer
+    /// macOS); `None` when it is found at [`RUNTIME_PATH`]. Either way at a made-up path,
+    /// so no screen depends on this machine's library.
+    runtime: Option<RuntimeCheck>,
     /// A model to download through the controller, until its download is held or has
     /// failed.
     download: Option<&'static str>,
@@ -301,6 +301,9 @@ pub const SCREENS: &[Screen] = &[
 
 /// Where the screens say ONNX Runtime is, found or not.
 const RUNTIME_PATH: &str = "/opt/onnxruntime/lib/libonnxruntime.so";
+/// Where the screens of a Mac say ONNX Runtime is: inside the app.
+const MAC_RUNTIME_PATH: &str =
+    "/Applications/Photostacker.app/Contents/Frameworks/libonnxruntime.dylib";
 /// How far the `models` screen's download is held, in percent.
 const HELD_PERCENT: u64 = 43;
 
@@ -326,14 +329,17 @@ fn models_downloading(dirs: &AppDirs) -> Result<Prepared, String> {
 fn models_failed(_dirs: &AppDirs) -> Result<Prepared, String> {
     Ok(Prepared {
         installer: Some(Arc::new(ScreenInstaller { fails: true })),
-        runtime_problem: Some(LibraryProblem::Missing),
+        runtime: Some(RuntimeCheck {
+            path: PathBuf::from(RUNTIME_PATH),
+            problem: Some(LibraryProblem::Missing),
+        }),
         download: Some("dinov2-small"),
         ..Prepared::default()
     })
 }
 
-/// The `needs-macos` screen's data: ONNX Runtime there, but needing macOS 14.0 on macOS
-/// 13.6, and nothing to download.
+/// The `needs-macos` screen's data: ONNX Runtime inside a Mac app, there but needing
+/// macOS 14.0 on macOS 13.6, and nothing to download.
 fn models_needing_macos(_dirs: &AppDirs) -> Result<Prepared, String> {
     let version = |major, minor| OsVersion {
         major,
@@ -342,9 +348,12 @@ fn models_needing_macos(_dirs: &AppDirs) -> Result<Prepared, String> {
     };
     Ok(Prepared {
         installer: Some(Arc::new(ScreenInstaller { fails: false })),
-        runtime_problem: Some(LibraryProblem::NeedsMacos {
-            needed: version(14, 0),
-            running: version(13, 6),
+        runtime: Some(RuntimeCheck {
+            path: PathBuf::from(MAC_RUNTIME_PATH),
+            problem: Some(LibraryProblem::NeedsMacos {
+                needed: version(14, 0),
+                running: version(13, 6),
+            }),
         }),
         ..Prepared::default()
     })
@@ -1412,10 +1421,10 @@ pub fn start(screen: &Screen) -> Result<(TempDir, Prepared, Held, Waker), String
         platform: Arc::new(Native),
         embedder: prepared.embedder.clone(),
         installer: prepared.installer.clone(),
-        runtime: RuntimeCheck {
+        runtime: prepared.runtime.clone().unwrap_or_else(|| RuntimeCheck {
             path: PathBuf::from(RUNTIME_PATH),
-            problem: prepared.runtime_problem,
-        },
+            problem: None,
+        }),
     })
     .map_err(|error| format!("the app cannot start: {error}"))?;
     // Declared after the controller, so an early return drops it first.
