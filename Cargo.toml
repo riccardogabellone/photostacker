@@ -47,9 +47,9 @@ ctrlc = "3"
 
 # Store
 # SQLite compiled in, so no system library is needed.
-rusqlite = { version = "0.40", features = ["bundled"] }
-# 2.6 requires rusqlite 0.40, which is why rusqlite is not 0.41.
-rusqlite_migration = "2.6"
+rusqlite = { version = "0.41", features = ["bundled"] }
+# Each release requires one rusqlite: 2.7 requires 0.41, so the two move together.
+rusqlite_migration = "2.7"
 # The vec0 virtual tables of the embeddings, registered as an auto extension.
 sqlite-vec = "0.1.9"
 # The per-platform app data and cache folders.

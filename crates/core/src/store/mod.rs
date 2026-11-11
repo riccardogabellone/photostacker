@@ -44,7 +44,8 @@ const BUSY_TIMEOUT: Duration = Duration::from_millis(5000);
 /// The page cache of the writer ([`Store::open`]) and of an in-memory
 /// store, in KiB: SQLite's default.
 ///
-/// The bundled SQLite is built with `SQLITE_ENABLE_MEMORY_MANAGEMENT`, so
+/// The bundled SQLite is built with `SQLITE_ENABLE_MEMORY_MANAGEMENT`
+/// (`LIBSQLITE3_FLAGS` in `.cargo/config.toml`), so
 /// the page caches of every connection of the process are one pool, as
 /// large as the sum of their sizes (spec §4.3, "What a review edit
 /// costs"). A connection that reaches its own size takes the oldest pages
@@ -279,6 +280,30 @@ mod tests {
         let reader = Store::open_read_only(&path).unwrap();
         assert_eq!(pragma::<i64>(&writer, "cache_size"), -WRITER_CACHE_KIB);
         assert_eq!(pragma::<i64>(&reader, "cache_size"), -READ_ONLY_CACHE_KIB);
+    }
+
+    /// The store's cache sizes assume that every connection of the process
+    /// shares one page cache, which only a SQLite built with
+    /// `SQLITE_ENABLE_MEMORY_MANAGEMENT` does (spec §4.3).
+    #[test]
+    fn the_bundled_sqlite_shares_one_page_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("photostacker.db")).unwrap();
+        let options: Vec<String> = store
+            .conn
+            .prepare("PRAGMA compile_options")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(
+            options.iter().any(|o| o == "ENABLE_MEMORY_MANAGEMENT"),
+            "SQLite was built without SQLITE_ENABLE_MEMORY_MANAGEMENT, so each \
+             connection has a page cache of its own: build it with \
+             LIBSQLITE3_FLAGS=-DSQLITE_ENABLE_MEMORY_MANAGEMENT (see \
+             .cargo/config.toml). Its options: {options:?}"
+        );
     }
 
     #[test]
