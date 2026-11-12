@@ -134,7 +134,10 @@ depends = [
     # dynamic loader; libde265-0 is the HEVC decoder of HEIC photos, which libheif,
     # built in, uses; libstdc++6 and libgcc-s1 come with libheif's C++. ONNX Runtime's
     # library, which the package carries, links nothing more.
-    "libc6",
+    # The app uses symbols of glibc 2.35 (`objdump -T`: GLIBC_2.35 is the highest), the
+    # build host's; an older glibc could not start it. libstdc++'s highest, GLIBCXX_3.4.29
+    # (GCC 11), comes with every release that has glibc 2.35, so it needs no version.
+    "libc6 (>= 2.35)",
     "libde265-0",
     "libstdc++6",
     "libgcc-s1",
@@ -166,13 +169,11 @@ depends = [
 "../../assets/icons/icon-256.png" = "usr/share/icons/hicolor/256x256/apps/io.github.riccardogabellone.Photostacker.png"
 "../../assets/icons/icon-512.png" = "usr/share/icons/hicolor/512x512/apps/io.github.riccardogabellone.Photostacker.png"
 
-[package.metadata.packager.appimage]
-# The Debian package depends on the system's libde265; the AppImage carries the build
-# host's copy (in usr/lib/<multiarch folder>). linuxdeploy, which makes the AppImage,
-# copies the libraries the executables link into usr/lib too, but for the base system's
-# (libc, libstdc++ and the like); naming libde265 here keeps it in the AppImage whatever
-# linuxdeploy decides.
-libs = ["libde265.so.0"]
+# No `appimage.libs`: the Debian package depends on the system's libde265, and the
+# AppImage carries the build host's copy because linuxdeploy, which makes it, copies into
+# usr/lib every library the executables link but the base system's (libc, libstdc++ and
+# the like). Naming libde265 in `libs` would only add a second, unused copy.
+# scripts/smoke.sh checks the AppImage holds it and that its executables load that copy.
 
 # The AppImage tooling looks for the desktop entry under the main binary's name.
 [package.metadata.packager.appimage.files]

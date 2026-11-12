@@ -23,7 +23,8 @@
 # licence files cargo-about fetches, cargo-packager's own tools). Cargo builds into
 # CARGO_TARGET_DIR when it is set, else into <repo>/target. On Windows also: Visual Studio
 # or its Build Tools with the C++ workload (vswhere.exe finds them), VCPKG_ROOT set to the
-# vcpkg root that scripts/windows-heif.ps1 prints (libheif comes from there), and PowerShell.
+# vcpkg root that scripts/windows-heif.ps1 prints (libheif comes from there), and PowerShell 7
+# (pwsh).
 #
 # macOS has bash 3.2 and BSD tools: no associative arrays, no mapfile, no readlink -f.
 set -euo pipefail
@@ -78,6 +79,9 @@ cargo about --version >/dev/null 2>&1 ||
 if [ "$os" = windows ] && [ -z "${VCPKG_ROOT:-}" ]; then
     fail "VCPKG_ROOT is not set: run scripts/windows-heif.ps1 and set VCPKG_ROOT to the folder it prints on its last line"
 fi
+if [ "$os" = windows ] && ! command -v pwsh >/dev/null 2>&1; then
+    fail "pwsh (PowerShell 7) is not on the PATH: it makes the portable zip; Windows PowerShell 5.1 would write entry names with backslashes"
+fi
 
 # One absolute build folder for cargo and the packager alike: the packager runs in
 # crates/ui, where a relative CARGO_TARGET_DIR would name another folder.
@@ -110,9 +114,12 @@ copy_vc_runtime() {
     if [ ! -f "$vswhere" ]; then
         fail "vswhere.exe is not at $vswhere: install Visual Studio or its Build Tools, with the C++ workload"
     fi
-    vs=$("$vswhere" -latest -products '*' -property installationPath | tr -d '\r')
+    # Among several installations, the newest with the C++ tools, which install the
+    # redistributable folder.
+    vs=$("$vswhere" -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 \
+        -property installationPath | tr -d '\r')
     if [ -z "$vs" ]; then
-        fail "vswhere.exe found no Visual Studio installation"
+        fail "vswhere.exe found no Visual Studio installation with the C++ tools: install the C++ workload of Visual Studio or its Build Tools"
     fi
     redist="$(cygpath -u "$vs")/VC/Redist/MSVC"
     # Version folders (14.44.35112) and others (v143); sort -V puts the highest first.
@@ -188,22 +195,19 @@ echo "Packaging $formats into $out" >&2
     --binaries-dir "$(native "$release")" --out-dir "$(native "$out")")
 
 if [ "$os" = windows ]; then
-    # The portable zip: the app's folder, as the installer fills it, at the zip's root.
-    # Git Bash has no zip; PowerShell's Compress-Archive makes it.
+    # The portable zip: the contents of the app's folder, as the installer fills it, at
+    # the zip's root, with no folder around them. Git Bash has no zip; PowerShell 7's
+    # Compress-Archive makes it (Windows PowerShell 5.1's writes entry names with
+    # backslashes, which other systems' unzip tools misread).
     portable="$stage/portable"
     mkdir -p "$portable"
     cp "$release/Photostacker.exe" "$release/photostacker-cli.exe" "$portable/"
     cp -R "$stage/resources/." "$portable/"
     zip="$out/Photostacker_${version}_x64-portable.zip"
-    if command -v pwsh >/dev/null 2>&1; then
-        powershell=pwsh
-    else
-        powershell=powershell.exe
-    fi
     # Single quotes in a PowerShell string are doubled.
     from=$(native "$portable" | sed "s/'/''/g")
     to=$(native "$zip" | sed "s/'/''/g")
-    MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' "$powershell" -NoProfile -NonInteractive -Command \
+    MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' pwsh -NoProfile -NonInteractive -Command \
         "\$ErrorActionPreference = 'Stop'; Compress-Archive -Path '$from\\*' -DestinationPath '$to'"
 fi
 

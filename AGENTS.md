@@ -49,7 +49,8 @@ just test --no-default-features  # the same tests without ml and heic
 just deny                     # cargo deny check: licences, advisories, bans and sources (deny.toml); needs the network
 just licences                 # the crates' licences, with their texts (about.toml), into dist/package/resources/licenses/THIRD-PARTY-LICENSES.md; needs the network
 just package deb,appimage     # this system's packages into dist/packages (dmg on macOS; scripts/package.sh nsis,wix in Git Bash on Windows); packaging/README.md
-just smoke dist/packages/*.deb dist/packages/*.AppImage  # check built packages: contents, links, a run of the CLI from each
+just smoke dist/packages/*.deb dist/packages/*.AppImage  # check built packages: contents, links, a run of the CLI from each; installs nothing
+# just smoke --install …      really installs the .deb and the NSIS installer: only on a throwaway machine (a CI runner)
 
 PHOTOSTACKER_DATA_DIR=<scratch> just run          # the desktop app, release build
 just run-cli --help                                # the CLI, release build; arguments go to the binary

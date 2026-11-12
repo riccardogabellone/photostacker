@@ -31,7 +31,7 @@ The packages land in `dist/packages`:
 | AppImage | `Photostacker_<version>_x86_64.AppImage` |
 | NSIS installer | `Photostacker_<version>_x64-setup.exe` |
 | MSI | `Photostacker_<version>_x64_en-US.msi` |
-| Portable zip | `Photostacker_<version>_x64-portable.zip`: the app's folder, at the zip's root |
+| Portable zip | `Photostacker_<version>_x64-portable.zip`: the contents of the app's folder at the zip's root, with no folder around them |
 | Disk image | `Photostacker_<version>_aarch64.dmg` on Apple silicon, `Photostacker_<version>_x64.dmg` on Intel |
 
 ## Building locally
@@ -67,17 +67,19 @@ It empties `dist/package` and `dist/packages` first, so a package never carries 
 ```sh
 just smoke dist/packages/*.deb dist/packages/*.AppImage          # Linux
 just smoke dist/packages/*.dmg                                   # macOS
-scripts/smoke.sh dist/packages/*.exe dist/packages/*.msi dist/packages/*.zip  # Windows, in Git Bash
+scripts/smoke.sh dist/packages/*.zip dist/packages/*.exe dist/packages/*.msi  # Windows, in Git Bash
 ```
 
-For each package, `scripts/smoke.sh` unpacks it in a scratch folder (`dpkg -x`, `--appimage-extract`, a read-only `hdiutil attach`, `Expand-Archive`, or a silent install and uninstall of the NSIS installer; the MSI is only checked to exist, since installing it needs elevation) and checks:
+These install nothing. For each package, `scripts/smoke.sh` unpacks it in a scratch folder (`dpkg -x`, `--appimage-extract`, a read-only `hdiutil attach`, `Expand-Archive`) and checks it. The NSIS installer and the MSI are only checked to exist and not be empty: the portable zip holds the same files, and gets the full check. The checks:
 
 - **contents:** both executables, ONNX Runtime's library and the eight licence files where the app looks for them; on Windows the Visual C++ runtime; in the AppImage `libde265.so.0`, which its executables load;
 - **links:** on Linux each executable links only `libde265.so.0` and the C and C++ runtimes; on macOS only libraries under `/usr/lib/` and `/System/Library/`; on Windows no libheif, libde265 or x265 DLL is in the package, and the tool runs with only Windows' own folders on the `PATH`;
 - **macOS:** every Mach-O file needs macOS 11.0, but ONNX Runtime on Apple silicon, which needs 14.0;
 - **runs:** with `ORT_DYLIB_PATH` unset and a scratch data folder, `photostacker-cli info` names the version in the package's file name, libde265 as the HEVC decoder, and the ONNX Runtime pinned for the system, loaded from the package; a dry run over `crates/core/tests/fixtures/heic` reads every HEIC file there, with no error.
 
-Each check prints one line; the first that fails says what it expected and what it found, and the script exits 1. `--install` installs a `.deb` with `apt-get` (as root, or through `sudo`) instead of unpacking it, and removes it afterwards.
+Each check prints one line; the first that fails says what it expected and what it found, and the script exits 1.
+
+**`--install` changes the machine, and is meant for a throwaway one, such as a CI runner.** With it, the script installs the `.deb` with `apt-get` (as root, or through `sudo`) instead of unpacking it, and removes it afterwards; and it installs the NSIS installer silently into a scratch folder, checks the install, and uninstalls it. The NSIS installer ends a running Photostacker without asking and takes over the entry of an installed one in the system's list of apps, so the script refuses to start it when Photostacker is installed for this user or running. After the uninstall it removes the registry key the uninstaller leaves behind (`HKCU\Software\Riccardo Gabellone\Photostacker`, the folder the next install would reuse) and checks that the uninstall entry is gone. The MSI is never installed: that needs elevation.
 
 ## Releasing
 

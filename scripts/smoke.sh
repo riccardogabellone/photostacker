@@ -3,6 +3,10 @@
 #
 #   scripts/smoke.sh [--install] <package>...
 #
+# --install really installs on this machine, and is meant for a throwaway one (a CI
+# runner): the .deb through apt-get, the NSIS installer through its silent install. Without
+# it, nothing is installed and the machine is left as it was.
+#
 # Each package is opened by its kind, on the system it is for:
 #   .deb            dpkg -x into a scratch folder; with --install, apt-get installs it instead
 #                   (as root, or through sudo) and removes it afterwards
@@ -10,10 +14,15 @@
 #                   with LD_LIBRARY_PATH at the tree's own libraries, as the AppImage's
 #                   launcher sets it
 #   .dmg            hdiutil attach, read-only, on a scratch mount point, detached on every exit
-#   -setup.exe      the NSIS installer: a silent install into a scratch folder, then a silent
-#                   uninstall
+#   -setup.exe      the NSIS installer: only checked to exist and not be empty, unless
+#                   --install: then a silent install into a scratch folder, the checks, a
+#                   silent uninstall, and the registry key the uninstaller leaves is removed.
+#                   It refuses when Photostacker is installed for this user or running: the
+#                   installer would take over the install's entry in the system's list of apps,
+#                   and both it and the uninstaller end a running Photostacker without asking.
 #   .msi            only checked to exist and not be empty: installing it needs elevation
-#   -portable.zip   Expand-Archive into a scratch folder
+#   -portable.zip   Expand-Archive into a scratch folder; it holds the files the installers
+#                   install
 # and then checked:
 #   contents   both executables; ONNX Runtime's library where the app looks for it and the
 #              eight files of the licenses folder (spec §8.3, §11.3); on Windows the Visual
@@ -32,8 +41,9 @@
 # found, and the script exits 1. The tool runs with ORT_DYLIB_PATH unset and its data folder
 # in the scratch folder, which is removed at the end.
 #
-# Needs: Linux: dpkg, objdump (binutils), ldd. macOS: hdiutil, otool, file. Windows (Git
-# Bash): cygpath, and PowerShell for the zip.
+# Needs: Linux: dpkg, objdump (binutils), ldd; apt-get for --install. macOS: hdiutil,
+# otool, file. Windows (Git Bash): cygpath, PowerShell for the zip, and reg.exe and
+# tasklist.exe for --install.
 #
 # macOS has bash 3.2 and BSD tools: no associative arrays, no mapfile, no readlink -f.
 set -euo pipefail
@@ -49,6 +59,7 @@ ok() {
 
 usage() {
     echo "usage: $0 [--install] <package>..." >&2
+    echo "  --install  really install the .deb (apt-get) and the NSIS installer on this machine; for a throwaway one, such as a CI runner" >&2
     exit 2
 }
 
@@ -109,12 +120,9 @@ native() {
 
 if [ "$os" = windows ]; then
     # Under the repository: the system's temporary folder may be named in its short 8.3
-    # form, which the tool would not print back, and the installer's /D= takes no space.
+    # form, which the tool would not print back.
     mkdir -p "$repo/dist"
     scratch=$(mktemp -d "$repo/dist/smoke.XXXXXX")
-    case "$(native "$scratch")" in
-        *' '*) fail "the scratch folder $(native "$scratch") has a space in it, which the NSIS installer's /D= cannot take" ;;
-    esac
     if command -v pwsh >/dev/null 2>&1; then
         powershell=pwsh
     else
@@ -129,17 +137,21 @@ else
 fi
 
 # What a failed or interrupted run must not leave behind.
-mounted=        # the disk image's mount point, while it may be attached
-nsis_dir=       # an NSIS install, until it is uninstalled
-deb_installed=0 # the Debian package, installed with --install
+mounted=         # the disk image's mount point, while it may be attached
+nsis_dir=        # an NSIS install, until it is uninstalled
+nsis_registry=0  # 1 from the NSIS install until its registry keys are cleaned up
+deb_installed=0  # the Debian package, installed with --install
 sudo=
 cleanup() {
     local status=$?
     if [ -n "$mounted" ]; then
-        hdiutil detach "$mounted" -quiet 2>/dev/null || hdiutil detach "$mounted" -force -quiet 2>/dev/null || true
+        detach "$mounted" || true
     fi
     if [ -n "$nsis_dir" ]; then
         uninstall_nsis "$nsis_dir" >/dev/null 2>&1 || true
+    fi
+    if [ "$nsis_registry" = 1 ]; then
+        nsis_forget >/dev/null 2>&1 || true
     fi
     if [ "$deb_installed" = 1 ]; then
         $sudo apt-get remove -y photostacker >/dev/null 2>&1 || true
@@ -158,10 +170,105 @@ unset ORT_DYLIB_PATH
 PHOTOSTACKER_DATA_DIR=$(native "$scratch/data")
 export PHOTOSTACKER_DATA_DIR
 
+# Detaches the disk image mounted at $1. A fresh mount may be held for a moment (Spotlight
+# indexing it), so it tries again, then forces it.
+detach() {
+    hdiutil detach "$1" -quiet 2>/dev/null && return 0
+    sleep 2
+    hdiutil detach "$1" -quiet 2>/dev/null && return 0
+    hdiutil detach "$1" -force -quiet 2>/dev/null
+}
+
+# Runs a Windows program whose arguments start with `/` (installer switches, reg.exe and
+# tasklist.exe options): MSYS would otherwise take them for paths and rewrite them.
+windows_command() {
+    MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' "$@"
+}
+
+# The registry keys that cargo-packager 0.11.8's NSIS template (installer.nsi) writes for a
+# current-user install: the uninstall entry, which Windows lists among the installed apps
+# (UNINSTKEY), and HKCU\Software\<publisher>\<product name> with the install folder, which
+# the next install would reuse (MANUPRODUCTKEY). The uninstaller removes the first and
+# leaves the second. The publisher is the packager's, in crates/ui/Cargo.toml.
+nsis_keys() {
+    local publisher
+    publisher=$(sed -n 's/^publisher = "\(.*\)"$/\1/p' "$repo/crates/ui/Cargo.toml" | sed -n 1p)
+    if [ -z "$publisher" ]; then
+        fail "--install: expected a publisher in crates/ui/Cargo.toml's packager table, found none"
+    fi
+    uninstall_key='HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Photostacker'
+    publisher_key="HKCU\\Software\\$publisher"
+    product_key="$publisher_key\\Photostacker"
+}
+
+# Whether the registry key $1 exists, in the 64-bit view the installer writes to.
+key_exists() {
+    windows_command reg.exe query "$1" /reg:64 >/dev/null 2>&1
+}
+
+# Before a real NSIS install: refuses when Photostacker is installed for this user (the
+# install would take over its uninstall entry, and the uninstall would remove it) or running
+# (the installer and the uninstaller end it without asking).
+nsis_precheck() {
+    local tasks
+    nsis_keys
+    if key_exists "$uninstall_key"; then
+        fail "--install: expected Photostacker not to be installed for this user, found $uninstall_key; the silent install would take over its entry and the uninstall would remove it: uninstall it first, or check the installer on a throwaway machine"
+    fi
+    tasks=$(windows_command tasklist.exe /FI "IMAGENAME eq Photostacker.exe" /FO CSV /NH 2>/dev/null | tr -d '\r') ||
+        fail "--install: tasklist.exe could not list the running programs"
+    case "$tasks" in
+        *'"Photostacker.exe"'*) fail "--install: expected Photostacker.exe not to be running, found it running; the silent installer and uninstaller would end it without asking: close it first" ;;
+    esac
+    ok "--install: Photostacker is not installed for this user ($uninstall_key does not exist), and Photostacker.exe is not running"
+}
+
+# Before a real NSIS install: keeps a copy of the product key if it is there already (left
+# by an earlier install), and notes whether the publisher's key is, so nsis_forget can put
+# the registry back as it was.
+nsis_remember() {
+    product_key_copy=
+    if key_exists "$product_key"; then
+        product_key_copy="$scratch/product-key.reg"
+        windows_command reg.exe export "$product_key" "$(native "$product_key_copy")" /y /reg:64 >/dev/null ||
+            fail "--install: expected reg.exe to export $product_key, found it failed"
+    fi
+    publisher_key_existed=0
+    if key_exists "$publisher_key"; then
+        publisher_key_existed=1
+    fi
+    # A silent install still makes the Start menu folder (only the desktop shortcut obeys
+    # /NS); the uninstaller removes it.
+    if [ -z "${APPDATA:-}" ]; then
+        fail "--install: expected APPDATA to name this user's roaming folder, found it unset"
+    fi
+    start_menu="$(cygpath -u "$APPDATA")/Microsoft/Windows/Start Menu/Programs/Photostacker"
+    start_menu_existed=0
+    if [ -e "$start_menu" ]; then
+        start_menu_existed=1
+    fi
+    nsis_registry=1
+}
+
+# After the NSIS uninstall: removes the product key the uninstaller leaves, puts back the
+# one that was there before, if any, and removes the publisher's key if the install made it.
+# Returns non-zero when reg.exe fails (it also runs from the EXIT trap, so it does not exit).
+nsis_forget() {
+    if key_exists "$product_key"; then
+        windows_command reg.exe delete "$product_key" /f /reg:64 >/dev/null || return 1
+    fi
+    if [ -n "$product_key_copy" ]; then
+        windows_command reg.exe import "$(native "$product_key_copy")" /reg:64 >/dev/null 2>&1 || return 1
+    elif [ "$publisher_key_existed" = 0 ] && key_exists "$publisher_key"; then
+        windows_command reg.exe delete "$publisher_key" /f /reg:64 >/dev/null || return 1
+    fi
+    nsis_registry=0
+}
+
 # Runs NSIS's silent uninstaller of the install in $1 in place (`_?=`, which must come last
 # and unquoted), so it ends before this returns; it leaves itself behind.
 uninstall_nsis() {
-    MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' "$1/uninstall.exe" /S "_?=$(native "$1")"
+    windows_command "$1/uninstall.exe" /S "_?=$(native "$1")"
 }
 
 # What is at $1, for a failure's "found".
@@ -281,7 +388,7 @@ check_minimum_macos() {
         if [ "$(basename "$file")" = libonnxruntime.dylib ] && [ "$arch" = aarch64 ]; then
             expected=14.0
         fi
-        minos=$(minimum_macos "$file")
+        minos=$(minimum_macos "$file") || fail "macOS: expected otool -l to read $file, found it failed"
         if [ "$minos" != "$expected" ]; then
             fail "macOS: expected $file to need macOS $expected, found ${minos:-no minimum}"
         fi
@@ -424,20 +531,21 @@ for package in "${packages[@]}"; do
             res_dir=$lib_dir
             ;;
         linux:*.AppImage)
-            mkdir "$scratch/appimage"
             # A copy, made executable: a downloaded file may have lost its mode.
-            cp "$package" "$scratch/appimage/package.AppImage"
-            chmod +x "$scratch/appimage/package.AppImage"
+            { mkdir "$scratch/appimage" && cp "$package" "$scratch/appimage/package.AppImage" &&
+                chmod +x "$scratch/appimage/package.AppImage"; } ||
+                fail "$name: expected to copy it into $scratch/appimage and make the copy executable, found it failed"
             (cd "$scratch/appimage" && ./package.AppImage --appimage-extract >/dev/null) ||
                 fail "$name: expected --appimage-extract to unpack it, found it failed"
-            rm "$scratch/appimage/package.AppImage"
+            rm "$scratch/appimage/package.AppImage" ||
+                fail "$name: expected to remove the copy $scratch/appimage/package.AppImage, found it failed"
             root="$scratch/appimage/squashfs-root"
             bin_dir="$root/usr/bin" lib_dir="$root/usr/lib/Photostacker"
             res_dir=$lib_dir library_path="$root/usr/lib"
             ok "unpacked with --appimage-extract into $root"
             ;;
         macos:*.dmg)
-            mkdir "$scratch/dmg"
+            mkdir "$scratch/dmg" || fail "$name: expected to make the mount point $scratch/dmg, found it failed"
             mounted="$scratch/dmg"
             hdiutil attach -nobrowse -readonly -noautoopen -mountpoint "$mounted" "$package" >/dev/null ||
                 fail "$name: expected hdiutil to attach it, found it failed"
@@ -447,10 +555,24 @@ for package in "${packages[@]}"; do
             ok "attached at $mounted"
             ;;
         windows:*-setup.exe)
+            if [ "$install" != 1 ]; then
+                if [ ! -s "$package" ]; then
+                    fail "$name: expected an installer, found an empty file"
+                fi
+                ok "$name exists and is not empty; it is not installed here: only --install installs it, which changes this machine (the portable zip holds the same files and gets the full check)"
+                continue
+            fi
             root="$scratch/nsis"
+            # NSIS takes /D= last and unquoted, spaces and all; but MSYS wraps an argument
+            # that has a space in quotes, and NSIS would read the quotes as part of the path.
+            case "$(native "$root")" in
+                *' '*) fail "$name: expected an install folder without spaces, found $(native "$root"): MSYS would quote the /D= argument, and NSIS would take the quotes as part of the folder" ;;
+            esac
+            nsis_precheck
+            nsis_remember
             nsis_dir=$root
-            # /NS: no shortcuts. /D= must come last, unquoted.
-            MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' "$package" /S /NS "/D=$(native "$root")" ||
+            # /NS: no desktop shortcut. /D= must come last, unquoted.
+            windows_command "$package" /S /NS "/D=$(native "$root")" ||
                 fail "$name: expected the silent install to succeed, found exit status $?"
             bin_dir=$root lib_dir=$root res_dir=$root
             ok "installed silently into $(native "$root")"
@@ -490,7 +612,8 @@ for package in "${packages[@]}"; do
         if [ -z "$line" ]; then
             fail "contents: expected libde265.so.0 in $root/usr/lib, found none"
         fi
-        line=$(LD_LIBRARY_PATH="$library_path" ldd "$bin_dir/photostacker-cli" | awk '$1 == "libde265.so.0" { print $3 }')
+        line=$(LD_LIBRARY_PATH="$library_path" ldd "$bin_dir/photostacker-cli" | awk '$1 == "libde265.so.0" { print $3 }') ||
+            fail "contents: expected ldd to read $bin_dir/photostacker-cli, found it failed"
         case "$line" in
             "$root"/*) ok "contents: the AppImage carries libde265.so.0, and its tool loads $line" ;;
             *) fail "contents: expected the AppImage's tool to load its own libde265.so.0, found ${line:-none}" ;;
@@ -499,7 +622,7 @@ for package in "${packages[@]}"; do
     check_runs
 
     if [ -n "$mounted" ]; then
-        hdiutil detach "$mounted" -quiet || fail "$name: expected hdiutil to detach $mounted, found it failed"
+        detach "$mounted" || fail "$name: expected hdiutil to detach $mounted (tried twice, then with -force), found it failed"
         mounted=
         ok "detached"
     fi
@@ -509,7 +632,14 @@ for package in "${packages[@]}"; do
             fail "$name: expected the uninstaller to remove Photostacker.exe, found it is still there"
         fi
         nsis_dir=
-        ok "uninstalled silently"
+        if key_exists "$uninstall_key"; then
+            fail "$name: expected the uninstaller to remove $uninstall_key, found it is still there"
+        fi
+        if [ "$start_menu_existed" = 0 ] && [ -e "$start_menu" ]; then
+            fail "$name: expected the uninstaller to remove the Start menu folder $start_menu, found it is still there"
+        fi
+        nsis_forget || fail "$name: expected reg.exe to remove $product_key, which the uninstaller leaves (and put back what was there before), found it failed"
+        ok "uninstalled silently; $uninstall_key is gone, and $product_key is as it was before the install"
     fi
     if [ "$deb_installed" = 1 ]; then
         $sudo apt-get remove -y photostacker >/dev/null || fail "$name: expected apt-get to remove it, found it failed"

@@ -54,7 +54,7 @@ licences:
 package FORMATS:
     scripts/package.sh "$1"
 
-# Check built packages before anyone installs them: what they hold, what they link, and a run of the command-line tool from each; --install installs a .deb with apt-get instead of unpacking it (packaging/README.md).
+# Check built packages before anyone installs them: what they hold, what they link, and a run of the command-line tool from each; --install really installs the .deb and the NSIS installer, for a throwaway machine only (packaging/README.md).
 smoke *ARGS:
     scripts/smoke.sh "$@"
 
