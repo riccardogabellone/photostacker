@@ -1,10 +1,10 @@
 name: Release
 
-# A tag v<version> builds the packages on each of the four systems, checks them, and drafts
-# a GitHub release with them, their SHA-256 checksums and build-provenance attestations
-# (packaging/README.md, spec §11.3). A pull request that touches the packaging, and a run
-# started by hand, build and check the packages too, without a release, so a packaging
-# break shows before the tag.
+# A tag v<version> builds the packages on each of the four systems, checks them, attests
+# their build provenance (in GitHub's attestation store, not in the release), and drafts a
+# GitHub release with them and their SHA-256 checksums (packaging/README.md, spec §11.3). A
+# pull request that touches the packaging, and a run started by hand, build and check the
+# packages too, without a release, so a packaging break shows before the tag.
 on:
   push:
     tags: ["v*"]
