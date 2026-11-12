@@ -150,11 +150,13 @@ jobs:
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # --no-fail-fast: a run that fails names every test that fails on its system, not
+      # only the first.
       - name: Tests
-        run: cargo nextest run --workspace --locked
+        run: cargo nextest run --workspace --locked --no-fail-fast
       - name: Tests without ml and heic (Linux)
         if: runner.os == 'Linux'
-        run: cargo nextest run --workspace --locked --no-default-features
+        run: cargo nextest run --workspace --locked --no-fail-fast --no-default-features
       # The tests run in the test profile; this builds the executables users get.
       - name: Release build
         run: cargo build --release --locked -p photostacker-ui -p photostacker-cli
