@@ -11,8 +11,14 @@
 # in %LOCALAPPDATA%\photostacker\vcpkg, into which it installs
 # `libheif[core,libde265]:x64-windows-static-md`. `core` turns the port's default features
 # off: they include `hevc`, the x265 encoder, which is GPL. x265 is never kept: the script
-# removes it if an earlier install left it, and fails if it is still there at the end.
-# libde265 is then libheif's only codec, as on the other systems (spec §3).
+# removes it if an earlier install left it, and fails if it is still there at the end. A
+# libheif built with other features is removed and built again, so libde265 is its only
+# codec, as on the other systems (spec §3).
+#
+# The root is a folder of the script's own: one that does not exist yet, an empty one, or
+# one this script made before, which it marks with the file `.git\photostacker-vcpkg`. Any
+# other folder (someone's own vcpkg, a folder of files) is refused untouched: the script
+# rewrites its checkout by force and deletes what vcpkg installed there.
 #
 # The first run needs git and the network: it fetches the pinned commit (that commit only,
 # not vcpkg's history), bootstraps vcpkg (which downloads vcpkg.exe), and builds the two
@@ -44,11 +50,21 @@ $Libde265Version = '1.1.3'
 $VcpkgUrl = 'https://github.com/microsoft/vcpkg'
 $Triplet = 'x64-windows-static-md'
 $Package = "libheif[core,libde265]:$Triplet"
+# What each library must be in vcpkg's list: its version, and its features beyond `core`,
+# sorted and comma separated.
+$Wanted = @{
+    libheif  = @{ Version = $LibheifVersion; Features = 'libde265' }
+    libde265 = @{ Version = $Libde265Version; Features = '' }
+}
 
 $Repo = Split-Path -Parent $PSScriptRoot
 # A relative -Root is taken from PowerShell's current folder, not the process's.
 $Root = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Root)
 $Vcpkg = Join-Path $Root 'vcpkg.exe'
+# The file that marks a root as this script's: inside .git, so no checkout touches it.
+$Mark = Join-Path $Root '.git\photostacker-vcpkg'
+# What to do when the root this script made is in a state it cannot mend.
+$Remedy = "delete the folder $Root, which this script made, then run this script again."
 
 # Stops when $Root is the repository or inside it: vcpkg writes gigabytes under its root.
 function Assert-OutsideRepository {
@@ -56,6 +72,23 @@ function Assert-OutsideRepository {
     $root = $Root.TrimEnd('\') + '\'
     if ($root.StartsWith($repo, [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "The vcpkg root $Root is inside the repository: pass -Root with a folder outside it."
+    }
+}
+
+# Stops unless $Root is this script's to use: missing, an empty folder, or marked as made by
+# it. Nothing in a refused folder is touched.
+function Assert-OwnRoot {
+    if (-not (Test-Path -LiteralPath $Root)) {
+        return
+    }
+    if (-not (Test-Path -LiteralPath $Root -PathType Container)) {
+        throw "$Root is a file, not a folder: pass -Root with a folder that does not exist yet, or an empty one."
+    }
+    if (Test-Path -LiteralPath $Mark -PathType Leaf) {
+        return
+    }
+    if (Get-ChildItem -LiteralPath $Root -Force | Select-Object -First 1) {
+        throw "$Root holds files this script did not put there, and nothing in it was changed: pass -Root with a folder that does not exist yet, an empty one, or the one this script made before."
     }
 }
 
@@ -71,7 +104,7 @@ function Invoke-Git([string] $doing, [string[]] $arguments) {
     git -C $Root @arguments | Out-Host
     # A native command's failure does not throw, whatever $ErrorActionPreference says.
     if ($LASTEXITCODE -ne 0) {
-        throw "git could not $doing (exit code $LASTEXITCODE): check the network, or delete $Root, then run this script again."
+        throw "git could not $doing (exit code $LASTEXITCODE): check the network and run this script again; if it fails again, $Remedy"
     }
 }
 
@@ -152,13 +185,25 @@ function Find-X265($installed) {
     return , $installed.Where({ $_.package_name -eq 'x265' })
 }
 
-# True when $installed holds libheif and libde265 at the pinned versions for $Triplet, and no x265.
+# True when the vcpkg list entry $entry is the build of its library that $Wanted asks for.
+function Test-Wanted($entry) {
+    $wanted = $Wanted[$entry.package_name]
+    $features = (@($entry.features) | Sort-Object) -join ','
+    return $entry.triplet -eq $Triplet -and $entry.version -eq $wanted.Version -and $features -eq $wanted.Features
+}
+
+# The entries of $installed for libheif or libde265 on $Triplet that are not the build
+# $Wanted asks for: another version, or other features.
+function Find-Unwanted($installed) {
+    return , $installed.Where({
+            $Wanted.ContainsKey($_.package_name) -and $_.triplet -eq $Triplet -and -not (Test-Wanted $_)
+        })
+}
+
+# True when $installed holds libheif and libde265 as $Wanted asks, and no x265.
 function Test-Complete($installed) {
-    $wanted = @{ libheif = $LibheifVersion; libde265 = $Libde265Version }
-    foreach ($name in $wanted.Keys) {
-        $found = $installed.Where({
-                $_.package_name -eq $name -and $_.triplet -eq $Triplet -and $_.version -eq $wanted[$name]
-            })
+    foreach ($name in $Wanted.Keys) {
+        $found = $installed.Where({ $_.package_name -eq $name -and (Test-Wanted $_) })
         if ($found.Count -eq 0) {
             return $false
         }
@@ -174,12 +219,11 @@ function Update-Checkout {
     if ($current -ne $VcpkgCommit) {
         Write-Host "Fetching vcpkg $VcpkgCommit into $Root"
         New-Item -ItemType Directory -Force -Path $Root | Out-Null
-        if (-not (Test-Path -LiteralPath (Join-Path $Root '.git') -PathType Container)) {
+        if (-not (Test-Path -LiteralPath $Mark -PathType Leaf)) {
+            # Missing or empty (Assert-OwnRoot): a new repository, marked as this script's.
             Invoke-Git 'make a repository' @('init', '--quiet')
+            Set-Content -LiteralPath $Mark -Value 'A vcpkg checkout of scripts/windows-heif.ps1 (Photostacker).'
             Invoke-Git 'add the vcpkg remote' @('remote', 'add', 'origin', $VcpkgUrl)
-        }
-        else {
-            Invoke-Git 'set the vcpkg remote' @('remote', 'set-url', 'origin', $VcpkgUrl)
         }
         Invoke-Git "fetch vcpkg's commit $VcpkgCommit" @('fetch', '--depth', '1', 'origin', $VcpkgCommit)
         Invoke-Git "check out vcpkg's commit $VcpkgCommit" @('-c', 'advice.detachedHead=false', 'checkout', '--force', 'FETCH_HEAD')
@@ -197,6 +241,7 @@ function Update-Checkout {
 }
 
 Assert-OutsideRepository
+Assert-OwnRoot
 Assert-Git
 
 if (Update-Checkout) {
@@ -213,6 +258,16 @@ if (-not (Test-Complete $installed)) {
         Write-Host "Removing x265:$($entry.triplet), which is GPL, and what depends on it"
         Invoke-Vcpkg 'remove x265' @('remove', '--classic', '--recurse', "x265:$($entry.triplet)")
     }
+    # Another version or other codecs: vcpkg would keep such a build as it is, so it goes
+    # first, one at a time, since removing libde265 takes libheif with it.
+    $unwanted = Find-Unwanted (Get-Installed)
+    while ($unwanted.Count -gt 0) {
+        $entry = $unwanted[0]
+        $spec = "$($entry.package_name):$($entry.triplet)"
+        Write-Host "Removing $spec $($entry.version) [$(@($entry.features) -join ',')], to build it as pinned"
+        Invoke-Vcpkg "remove $spec" @('remove', '--classic', '--recurse', $spec)
+        $unwanted = Find-Unwanted (Get-Installed)
+    }
     Write-Host "Installing $Package (the first build takes a few minutes)"
     Invoke-Vcpkg "install $Package" @('install', '--classic', '--clean-after-build', $Package)
     $installed = Get-Installed
@@ -221,9 +276,9 @@ if (-not (Test-Complete $installed)) {
 Write-Host ''
 Invoke-Vcpkg 'list what is installed' @('list')
 if ((Find-X265 $installed).Count -ne 0) {
-    throw "x265, a GPL encoder, is installed in $Root and must never be linked: delete $Root, then run this script again."
+    throw "x265, a GPL encoder, is installed in $Root and must never be linked: $Remedy"
 }
 if (-not (Test-Complete $installed)) {
-    throw "vcpkg in $Root does not hold libheif $LibheifVersion and libde265 $Libde265Version for ${Triplet}: delete $Root, then run this script again."
+    throw "vcpkg in $Root does not hold libheif $LibheifVersion with libde265 as its only codec, and libde265 $Libde265Version, for ${Triplet}: $Remedy"
 }
 Write-Output $Root
