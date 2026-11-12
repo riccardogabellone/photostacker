@@ -12,7 +12,8 @@
 # libde265's GitHub releases, checks its SHA-256, and builds it with cmake: static,
 # position-independent, a release build, with no tools (no dec265, no encoder, no
 # sherlock265, no development tools, no fuzzers) and no SDL; on macOS for
-# MACOSX_DEPLOYMENT_TARGET, 11.0 when it is unset. It installs into <prefix>: the library in
+# MACOSX_DEPLOYMENT_TARGET, 11.0 when it is unset, and without the AVX2 and AVX-512 kernels
+# (the options below say why). It installs into <prefix>: the library in
 # <prefix>/lib/libde265.a, the headers in <prefix>/include/libde265, the pkg-config file in
 # <prefix>/lib/pkgconfig/libde265.pc. Then point the build at it:
 #
@@ -32,10 +33,11 @@
 # builds again. A <prefix> that holds another version is refused.
 #
 # On macOS it then checks its own work: every object in libde265.a runs on the deployment
-# target (scripts/macos-min.sh), and the .pc file names no -lstdc++, which macOS does not
-# have (libde265's template names -lc++ where the C++ library is libc++, as on macOS).
+# target (scripts/macos-min.sh), none needs the CPU detection of clang's runtime library,
+# which the app's link does not have, and the .pc file names no -lstdc++, which macOS does
+# not have (libde265's template names -lc++ where the C++ library is libc++, as on macOS).
 #
-# Needs curl, cmake, a C and C++ compiler, and the network; on macOS also otool (the
+# Needs curl, cmake, a C and C++ compiler, and the network; on macOS also otool and nm (the
 # Xcode command line tools), and macos-min.sh beside this script. On Linux the macOS checks
 # are left out. bash 3.2 (macOS): no associative arrays, no mapfile, no ${var,,}.
 set -euo pipefail
@@ -90,8 +92,10 @@ done
 
 target=
 if [ "$os" = macos ]; then
-    command -v otool >/dev/null 2>&1 ||
-        fail "otool is not on the PATH, and it checks the build: install the Xcode command line tools (xcode-select --install)"
+    for tool in otool nm; do
+        command -v "$tool" >/dev/null 2>&1 ||
+            fail "$tool is not on the PATH, and it checks the build: install the Xcode command line tools (xcode-select --install)"
+    done
     target=${MACOSX_DEPLOYMENT_TARGET:-11.0}
 fi
 
@@ -137,6 +141,13 @@ options=(
 )
 if [ "$os" = macos ]; then
     options+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=$target")
+    # libde265 chooses its AVX2 and AVX-512 kernels at run time with __builtin_cpu_supports,
+    # which on x86 needs two symbols of clang's runtime library (___cpu_model and
+    # ___cpu_indicator_init). rustc links a macOS executable without that library
+    # (-nodefaultlibs), so on an Intel Mac the app's link fails with the two undefined.
+    # Without these kernels the SSE4.1 ones remain, which ask the CPU with cpuid alone. On
+    # Apple silicon the two options change nothing: they are read only in an x86 build.
+    options+=(-DENABLE_AVX2=OFF -DENABLE_AVX512=OFF)
 fi
 jobs=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
 
@@ -155,6 +166,14 @@ fi
 
 if [ "$os" = macos ]; then
     "$scripts/macos-min.sh" "$target" "$library" >&2
+    # The symbols behind __builtin_cpu_supports and __builtin_cpu_init (the options above):
+    # a later release that asks for them elsewhere fails here, not in the app's link.
+    undefined=$(nm -u "$library" 2>/dev/null) || fail "nm cannot read $library"
+    cpu_detection=$(printf '%s\n' "$undefined" | grep -E '_cpu_(model|indicator_init|features2)$' | sed 's/.*[[:space:]]//' | sort -u | tr '\n' ' ' || true)
+    if [ -n "$cpu_detection" ]; then
+        fail "$library needs the CPU detection of clang's runtime library, which the app's link does not have: $cpu_detection"
+    fi
+    echo "ok: no object in $library needs the CPU detection of clang's runtime library" >&2
     if grep -q -- '-lstdc++' "$pc"; then
         fail "$pc names -lstdc++, which macOS does not have, so the app's link would fail: $(grep '^Libs.private:' "$pc")"
     fi
