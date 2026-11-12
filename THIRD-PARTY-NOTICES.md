@@ -250,19 +250,21 @@ How each reaches the packages:
 | Library | Linux | Windows | macOS |
 |---|---|---|---|
 | libheif | built into the app and the command-line tool, from the source the `libheif-sys` crate carries | built in, from vcpkg's `libheif` port with libde265 as its only codec (`libheif[core,libde265]`) | built in, from the source the `libheif-sys` crate carries |
-| libde265 | the system's shared library, `libde265.so.0`: the Debian package depends on it, and the AppImage carries a copy | built in, from vcpkg | built in |
+| libde265 | built in, from the release `scripts/libde265.sh` pins | built in, from vcpkg | built in, from the release `scripts/libde265.sh` pins |
 
 On Linux and macOS the libheif built in is the one the `libheif-sys` version
-in `Cargo.lock` carries (its version is the part after the `+`). On macOS
-libde265 is the release that `scripts/libde265.sh` pins, which names its
-version and its SHA-256. On Windows both libraries come from the vcpkg commit
-that `scripts/windows-heif.ps1` pins, which names their versions. libheif is
-built with libde265 as its only codec, so no codec under the GPL, such as x265
-or x264, is in the packages.
+in `Cargo.lock` carries (its version is the part after the `+`), and libde265
+is the release that `scripts/libde265.sh` pins, which names its version and
+its SHA-256. On Windows both libraries come from the vcpkg commit that
+`scripts/windows-heif.ps1` pins, which names their versions. libde265 is the
+same release, 1.1.3, on every system. libheif is built with libde265 as its
+only codec, so no codec under the GPL, such as x265 or x264, is in the
+packages.
 
 The LGPL lets you use changed copies of these libraries with Photostacker.
-Where a library is built in, the app is rebuilt with your copy in its place:
-Photostacker's complete source is public under the MIT licence, at
+Both are built into the app and the command-line tool on every system, so the
+app is rebuilt with your copy in place of the original: Photostacker's
+complete source is public under the MIT licence, at
 https://github.com/riccardogabellone/photostacker, and builds with the
 commands its `AGENTS.md` documents. Case by case:
 
@@ -271,14 +273,13 @@ commands its `AGENTS.md` documents. Case by case:
   cargo at the copy with a `[patch.crates-io]` entry in `Cargo.toml`.
 - **libheif on Windows** is built from vcpkg's `libheif` port: give vcpkg your
   libheif as that port, and build the app against it.
-- **libde265 on Linux** is the system's shared library: put your copy in place
-  of the system's `libde265.so.0` (or, in an unpacked AppImage, of
-  `usr/lib/libde265.so.0`, the copy its executables load), and the app loads
-  it, with no rebuild.
-- **libde265 on Windows and macOS** is built in: build your copy the same way
-  the project builds libde265 for that system (on Windows as vcpkg's
-  `libde265` port, on macOS as a static library), and build the app against
-  it.
+- **libde265 on Linux and macOS** is a static library that
+  `scripts/libde265.sh` builds from the pinned release: build your copy as a
+  static library the same way, into a folder of its own, point the build at
+  that folder as `AGENTS.md` documents for the pinned one, and build the app
+  against it.
+- **libde265 on Windows** is built from vcpkg's `libde265` port: give vcpkg
+  your libde265 as that port, and build the app against it.
 
 HEVC, the codec of HEIC photos, may be covered by patents in some countries:
 decoding it is the same grey area GIMP and ImageMagick ship with.

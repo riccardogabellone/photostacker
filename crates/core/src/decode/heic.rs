@@ -6,14 +6,15 @@
 //!   it finds on the build host, x265 and x264 (GPL) among them. The toolchain
 //!   file `packaging/cmake/libheif.cmake`, which `.cargo/config.toml` hands to
 //!   cmake, hides all of them but libde265, so the x265 and x264 development
-//!   files on a build host are ignored. HEVC decoding needs libde265. On
-//!   Linux it is the system's shared library (`libde265-dev` on Debian/Ubuntu
-//!   to build): the .deb depends on `libde265-0`, and the AppImage carries a
-//!   copy. On macOS libheif links the static libde265 that
-//!   `scripts/libde265.sh` builds, so the app bundle has no libde265 of its
-//!   own. Windows links vcpkg's `libheif[core,libde265]` statically (on MSVC
-//!   `libheif-sys` ignores `embedded-libheif` and uses vcpkg). Never `hevc` or
-//!   x265. A test checks that libde265 is libheif's only codec.
+//!   files on a build host are ignored. HEVC decoding needs libde265, which
+//!   every package has built in, the same pinned release on every system. On
+//!   Linux and macOS libheif links the static libde265 that
+//!   `scripts/libde265.sh` builds, so no package carries a separate libde265
+//!   library; a development build on Linux without it may link the system's
+//!   shared library (`libde265-dev` on Debian/Ubuntu), which the packaging
+//!   scripts refuse. Windows links vcpkg's `libheif[core,libde265]` statically
+//!   (on MSVC `libheif-sys` ignores `embedded-libheif` and uses vcpkg). Never
+//!   `hevc` or x265. A test checks that libde265 is libheif's only codec.
 //! - **Reading.** libheif reads through a [`StreamReader`] over the open file,
 //!   so it reads only what it needs: the boxes, then the image or the `Exif`
 //!   item. libheif's own file reader takes a narrow `char*` path, which on

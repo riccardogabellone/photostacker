@@ -1,23 +1,31 @@
 #!/usr/bin/env bash
-# libde265, the HEVC decoder that libheif links, built as a static library for the macOS
-# build (spec §3, §11.1):
+# libde265, the HEVC decoder that libheif links, built as a static library for the Linux
+# and macOS builds (spec §3, §11.1):
 #
 #   scripts/libde265.sh <prefix>
 #
-# On Linux the build takes the system's libde265 (libde265-dev), and on Windows vcpkg's
-# (scripts/windows-heif.ps1). macOS has no system libde265, and Homebrew's is built for the
-# macOS it runs on, not for the oldest one the app supports. So this script downloads the
-# release pinned below from libde265's GitHub releases, checks its SHA-256, and builds it
-# with cmake: static, position-independent, a release build, with no tools (no dec265, no
-# encoder, no sherlock265, no development tools, no fuzzers) and no SDL; on macOS for
+# The packages of every system link one libde265 release, built in: on Windows vcpkg's
+# (scripts/windows-heif.ps1), on Linux and macOS this script's. A Linux distribution has its
+# own release of libde265, with its own patches (Ubuntu 22.04 has 1.0.8), as a shared
+# library; macOS has none, and Homebrew's is built for the macOS it runs on, not for the
+# oldest one the app supports. So this script downloads the release pinned below from
+# libde265's GitHub releases, checks its SHA-256, and builds it with cmake: static,
+# position-independent, a release build, with no tools (no dec265, no encoder, no
+# sherlock265, no development tools, no fuzzers) and no SDL; on macOS for
 # MACOSX_DEPLOYMENT_TARGET, 11.0 when it is unset. It installs into <prefix>: the library in
 # <prefix>/lib/libde265.a, the headers in <prefix>/include/libde265, the pkg-config file in
 # <prefix>/lib/pkgconfig/libde265.pc. Then point the build at it:
 #
-#   CMAKE_PREFIX_PATH=<prefix> PKG_CONFIG_LIBDIR=<prefix>/lib/pkgconfig cargo build ...
+#   Linux:  CMAKE_PREFIX_PATH=<prefix> PKG_CONFIG_PATH=<prefix>/lib/pkgconfig cargo build ...
+#   macOS:  CMAKE_PREFIX_PATH=<prefix> PKG_CONFIG_LIBDIR=<prefix>/lib/pkgconfig cargo build ...
 #
-# libheif's cmake build (through libheif-sys) finds it there, and links it statically, as
-# there is no shared one beside it.
+# libheif's cmake build (through libheif-sys) finds it there before the system's folders,
+# and links it statically, as there is no shared one beside it; on Linux that holds even
+# where the system's libde265-dev is installed. On Linux PKG_CONFIG_PATH adds the folder to
+# pkg-config's search, where PKG_CONFIG_LIBDIR would replace it: other crates of the build
+# ask pkg-config about the system's libraries. libheif's cmake build keeps the libde265 it
+# found first, so after these variables are set, changed or removed, run
+# `cargo clean -p libheif-sys` and `cargo clean --release -p libheif-sys` before the build.
 #
 # A run that finds libde265.a and libde265.pc of this version in <prefix> does nothing.
 # cmake installs the .pc file last, so an interrupted install has none, and the next run
@@ -28,9 +36,8 @@
 # have (libde265's template names -lc++ where the C++ library is libc++, as on macOS).
 #
 # Needs curl, cmake, a C and C++ compiler, and the network; on macOS also otool (the
-# Xcode command line tools), and macos-min.sh beside this script. It also runs on Linux,
-# where only the macOS checks are left out. bash 3.2 (macOS): no associative arrays, no
-# mapfile, no ${var,,}.
+# Xcode command line tools), and macos-min.sh beside this script. On Linux the macOS checks
+# are left out. bash 3.2 (macOS): no associative arrays, no mapfile, no ${var,,}.
 set -euo pipefail
 
 version=1.1.3
@@ -60,7 +67,7 @@ scripts=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 case "$(uname -s)" in
     Darwin) os=macos ;;
     Linux) os=linux ;;
-    *) fail "this script builds libde265 on macOS (and on Linux, to test it), not on $(uname -s)" ;;
+    *) fail "this script builds libde265 on Linux and macOS, not on $(uname -s)" ;;
 esac
 
 # The version a libde265.pc names, or nothing.

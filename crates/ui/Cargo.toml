@@ -135,14 +135,14 @@ package-name = "photostacker"
 section = "graphics"
 depends = [
     # Linked by both executables (their NEEDED entries): libc6 also holds libm and the
-    # dynamic loader; libde265-0 is the HEVC decoder of HEIC photos, which libheif,
-    # built in, uses; libstdc++6 and libgcc-s1 come with libheif's C++. ONNX Runtime's
-    # library, which the package carries, links nothing more.
+    # dynamic loader; libstdc++6 and libgcc-s1 come with the C++ of libheif and of
+    # libde265, its HEVC decoder, which are both built in (libde265 from the release
+    # scripts/libde265.sh pins). ONNX Runtime's library, which the package carries, links
+    # nothing more.
     # The app uses symbols of glibc 2.35 (`objdump -T`: GLIBC_2.35 is the highest), the
     # build host's; an older glibc could not start it. libstdc++'s highest, GLIBCXX_3.4.29
     # (GCC 11), comes with every release that has glibc 2.35, so it needs no version.
     "libc6 (>= 2.35)",
-    "libde265-0",
     "libstdc++6",
     "libgcc-s1",
     # Loaded at run time by the window toolkit (winit and glutin open them by name), so
@@ -177,11 +177,10 @@ depends = [
 "../../assets/icons/icon-256.png" = "usr/share/icons/hicolor/256x256/apps/io.github.riccardogabellone.Photostacker.png"
 "../../assets/icons/icon-512.png" = "usr/share/icons/hicolor/512x512/apps/io.github.riccardogabellone.Photostacker.png"
 
-# No `appimage.libs`: the Debian package depends on the system's libde265, and the
-# AppImage carries the build host's copy because linuxdeploy, which makes it, copies into
-# usr/lib every library the executables link but the base system's (libc, libstdc++ and
-# the like). Naming libde265 in `libs` would only add a second, unused copy.
-# scripts/smoke.sh checks the AppImage holds it and that its executables load that copy.
+# No `appimage.libs`: linuxdeploy, which makes the AppImage, copies into usr/lib every
+# library the executables link but the base system's (libc, libstdc++ and the like), and
+# they link no other: libheif and libde265 are built in. scripts/smoke.sh checks that the
+# AppImage holds no libde265.
 
 # The AppImage tooling looks for the desktop entry under the main binary's name.
 [package.metadata.packager.appimage.files]

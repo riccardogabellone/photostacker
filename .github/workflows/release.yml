@@ -100,16 +100,16 @@ jobs:
       # every system: cargo-about 0.9.3 has no release binary for Intel macOS, and
       # install-action has no cargo-packager. cargo-about's binary needs its `cli` feature.
       # They are built outside the repository and before the build inputs, so neither the
-      # repository's .cargo/config.toml nor the macOS pkg-config path reaches their builds;
-      # rust-cache keeps the installed binaries for later runs.
+      # repository's .cargo/config.toml nor the build inputs' CMAKE_PREFIX_PATH and pkg-config
+      # path reaches their builds; rust-cache keeps the installed binaries for later runs.
       - name: cargo-about and cargo-packager
         working-directory: ${{ runner.temp }}
         run: |
           cargo install cargo-about --version 0.9.3 --locked --features cli
           cargo install cargo-packager --version 0.11.8 --locked
 
-      # The system's libraries, vcpkg or libde265, and ONNX Runtime, as in the CI; on a tag
-      # built from their pins, without the caches.
+      # The system packages, the pinned libde265 (Linux, macOS) or vcpkg (Windows), and ONNX
+      # Runtime, as in the CI; on a tag built from their pins, without the caches.
       - uses: ./.github/actions/build-inputs
         with:
           cache: ${{ !startsWith(github.ref, 'refs/tags/') }}

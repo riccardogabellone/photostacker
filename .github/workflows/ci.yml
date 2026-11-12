@@ -88,7 +88,8 @@ jobs:
           tool: nextest@0.9.150
           fallback: none
 
-      # The system's libraries, vcpkg or libde265, and ONNX Runtime (ORT_DYLIB_PATH).
+      # The system packages, the pinned libde265 (Linux, macOS) or vcpkg (Windows), and ONNX
+      # Runtime (ORT_DYLIB_PATH).
       - uses: ./.github/actions/build-inputs
 
       # dinov2-small, which a model test runs, from PHOTOSTACKER_MODELS_DIR: downloaded by the

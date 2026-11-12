@@ -1,10 +1,11 @@
 name: Build inputs
 description: >-
   What a build of the workspace needs before cargo on this runner (AGENTS.md, spec §11.1):
-  the system libraries on Linux, libheif and libde265 from vcpkg on Windows (VCPKG_ROOT),
-  a static libde265 on macOS (CMAKE_PREFIX_PATH, PKG_CONFIG_LIBDIR), and on every system
-  the pinned ONNX Runtime (ORT_DYLIB_PATH), each cached by its pin unless `cache` is
-  "false". Run it after the checkout, from the repository's root.
+  the system packages on Linux, libheif and libde265 from vcpkg on Windows (VCPKG_ROOT),
+  the pinned libde265 as a static library on Linux and macOS (CMAKE_PREFIX_PATH, and
+  PKG_CONFIG_PATH on Linux, PKG_CONFIG_LIBDIR on macOS), and on every system the pinned
+  ONNX Runtime (ORT_DYLIB_PATH), each cached by its pin unless `cache` is "false". Run it
+  after the checkout, from the repository's root.
 
 inputs:
   cache:
@@ -20,10 +21,43 @@ runs:
     - name: System packages (Linux)
       if: runner.os == 'Linux'
       shell: bash
+      # AGENTS.md's list without libde265-dev, its shortcut for a development build: here
+      # the build links the pinned libde265 (below), as the packages do.
       run: |
         sudo apt-get update
         sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-          build-essential cmake pkg-config libde265-dev libegl1 zenity
+          build-essential cmake pkg-config libegl1 zenity
+    - name: The distribution's release (Linux)
+      id: linux
+      if: runner.os == 'Linux' && inputs.cache == 'true'
+      shell: bash
+      # The cache of libde265 is kept apart for each release of the distribution: a static
+      # library built on a newer Ubuntu may need a newer C library than an older one has, and
+      # the CI's tests and the packages run on two.
+      run: |
+        . /etc/os-release
+        echo "release=$ID-$VERSION_ID" >>"$GITHUB_OUTPUT"
+    - name: Cache libde265 (Linux)
+      if: runner.os == 'Linux' && inputs.cache == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/libde265
+        # The script pins libde265's release; the build is for this runner's distribution
+        # release and architecture.
+        key: libde265-${{ runner.os }}-${{ steps.linux.outputs.release }}-${{ runner.arch }}-${{ hashFiles('scripts/libde265.sh') }}
+    - name: libde265 (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        prefix="$RUNNER_TEMP/libde265"
+        scripts/libde265.sh "$prefix"
+        # libheif's cmake build and libheif-sys's pkg-config find the static libde265 there
+        # before the system's folders. PKG_CONFIG_PATH adds the prefix to pkg-config's search,
+        # where PKG_CONFIG_LIBDIR would replace it: x11-dl, a crate of the window toolkit,
+        # asks pkg-config where the system's X11 libraries are. A PKG_CONFIG_PATH the runner
+        # already has is kept, after the prefix.
+        echo "CMAKE_PREFIX_PATH=$prefix" >>"$GITHUB_ENV"
+        echo "PKG_CONFIG_PATH=$prefix/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" >>"$GITHUB_ENV"
 
     - name: Where vcpkg goes (Windows)
       id: vcpkg

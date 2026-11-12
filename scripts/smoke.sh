@@ -31,9 +31,10 @@
 #                   install
 # and then checked:
 #   contents   both executables; ONNX Runtime's library where the app looks for it and the
-#              eight files of the licenses folder (spec §8.3, §11.3); in the AppImage,
-#              libde265.so.0
-#   links      Linux: each executable links only the C and C++ runtimes and libde265; macOS:
+#              eight files of the licenses folder (spec §8.3, §11.3); in the AppImage, no
+#              libde265 library, since libde265 is built into the executables
+#   links      Linux: each executable links only the C and C++ runtimes (one that needs
+#              libde265 was built against the system's libde265, not the pinned one); macOS:
 #              only the system's own libraries; Windows: every Visual C++ runtime DLL that
 #              the two executables and ONNX Runtime name is beside them
 #              (scripts/vc-runtime.sh), no libheif, libde265 or x265 DLL is in the package,
@@ -49,7 +50,7 @@
 # found, and the script exits 1. The tool runs with ORT_DYLIB_PATH unset and its data folder
 # in the scratch folder, which is removed at the end.
 #
-# Needs: Linux: dpkg, objdump (binutils), ldd; apt-get for --install. macOS: hdiutil,
+# Needs: Linux: dpkg, objdump (binutils); apt-get for --install. macOS: hdiutil,
 # otool, file. Windows (Git Bash): cygpath, PowerShell for the zip and the MSI, msiexec.exe,
 # and reg.exe and tasklist.exe for --install.
 #
@@ -332,8 +333,9 @@ check_contents() {
     ok "contents: Photostacker$exe and photostacker-cli$exe in $bin_dir, $library in $lib_dir, the eight licence files in $res_dir/licenses"
 }
 
-# Linux: the libraries each executable names (NEEDED) are the C and C++ runtimes and
-# libde265, which the Debian package depends on and the AppImage carries.
+# Linux: the libraries each executable names (NEEDED) are the C and C++ runtimes, which
+# the Debian package depends on. libheif and libde265 are built in (scripts/libde265.sh):
+# an executable that needs libde265 was built without the pinned one.
 check_links_linux() {
     local name dump needed lib
     command -v objdump >/dev/null 2>&1 || fail "links: objdump (binutils) is needed to read what the executables link"
@@ -345,9 +347,10 @@ check_links_linux() {
         fi
         for lib in $needed; do
             case "$lib" in
-                libde265.so.0 | libm.so.* | libstdc++.so.* | libgcc_s.so.* | libc.so.* | ld-linux* | \
+                libde265.so*) fail "links: expected libde265 built into $name, found it needs $lib: the package was built against the system's libde265 instead of the pinned one. Build the pinned one with scripts/libde265.sh <prefix>, set CMAKE_PREFIX_PATH=<prefix> and PKG_CONFIG_PATH=<prefix>/lib/pkgconfig, run cargo clean --release -p libheif-sys, and build the packages again with scripts/package.sh" ;;
+                libm.so.* | libstdc++.so.* | libgcc_s.so.* | libc.so.* | ld-linux* | \
                     libdl.so.* | libpthread.so.* | librt.so.*) ;;
-                *) fail "links: expected $name to link only libde265, libm, libstdc++, libgcc_s, libc, ld-linux, libdl, libpthread and librt, found $lib" ;;
+                *) fail "links: expected $name to link only libm, libstdc++, libgcc_s, libc, ld-linux, libdl, libpthread and librt, found $lib" ;;
             esac
         done
         ok "links: $name links only" $needed
@@ -648,6 +651,15 @@ for package in "${packages[@]}"; do
     esac
 
     check_contents
+    if [ -n "$library_path" ]; then
+        # linuxdeploy copies into the AppImage every library the executables link: a
+        # libde265 there means they were built against the system's, not the pinned one.
+        line=$(find "$root" -name 'libde265.so*' | sed -n 1p)
+        if [ -n "$line" ]; then
+            fail "contents: expected no libde265 library in the AppImage, as libde265 is built into the executables, found $line"
+        fi
+        ok "contents: no libde265 library in the AppImage"
+    fi
     case "$os" in
         linux) check_links_linux ;;
         macos)
@@ -656,19 +668,6 @@ for package in "${packages[@]}"; do
             ;;
         windows) check_links_windows ;;
     esac
-    if [ -n "$library_path" ]; then
-        # The AppImage carries libde265, and its own copy is the one its tool loads.
-        line=$(find "$root/usr/lib" -name libde265.so.0 -type f)
-        if [ -z "$line" ]; then
-            fail "contents: expected libde265.so.0 in $root/usr/lib, found none"
-        fi
-        line=$(LD_LIBRARY_PATH="$library_path" ldd "$bin_dir/photostacker-cli" | awk '$1 == "libde265.so.0" { print $3 }') ||
-            fail "contents: expected ldd to read $bin_dir/photostacker-cli, found it failed"
-        case "$line" in
-            "$root"/*) ok "contents: the AppImage carries libde265.so.0, and its tool loads $line" ;;
-            *) fail "contents: expected the AppImage's tool to load its own libde265.so.0, found ${line:-none}" ;;
-        esac
-    fi
     check_runs
 
     if [ -n "$mounted" ]; then

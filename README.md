@@ -37,7 +37,7 @@ A release, when there is one, holds these packages on the [releases page](https:
 
 ### Linux
 
-- **Debian package** (Debian, Ubuntu and the distributions built on them): `sudo apt install ./Photostacker_<version>_amd64.deb`. apt also installs the libraries it needs, libde265 (the HEIC decoder) among them. Photostacker is then in the applications menu, and the command-line tool, `photostacker-cli`, is on the `PATH`. `sudo apt remove photostacker` removes both.
+- **Debian package** (Debian, Ubuntu and the distributions built on them): `sudo apt install ./Photostacker_<version>_amd64.deb`. apt also installs the libraries it needs. Photostacker is then in the applications menu, and the command-line tool, `photostacker-cli`, is on the `PATH`. `sudo apt remove photostacker` removes both.
 - **AppImage** (any distribution): make the file executable (`chmod +x Photostacker_<version>_x86_64.AppImage`) and start it. It starts the desktop app; the command-line tool comes with the Debian package. Where FUSE is missing, see [The AppImage and FUSE](packaging/README.md#the-appimage-and-fuse).
 
 ### Windows
@@ -125,7 +125,7 @@ just run                                   # the desktop app
 just run-cli run <folder of photos>        # the command-line tool: group and write the stacks
 ```
 
-`libde265-dev` is the HEIC decoder, and `zenity` gives the app its file dialogs on a desktop without an XDG portal.
+`libde265-dev` is the HEIC decoder, which this build links as a shared library: the quick way for development. The packages and the project's CI link the pinned release of libde265 statically instead, built by `scripts/libde265.sh` ([AGENTS.md](AGENTS.md#environment) says how). `zenity` gives the app its file dialogs on a desktop without an XDG portal.
 
 ### Windows
 
