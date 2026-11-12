@@ -14,9 +14,12 @@
 # in System32, so a run there cannot show that a package lacks one of its DLLs; a clean
 # Windows has none of them, and the app would not start there. A file names each DLL it
 # imports, or loads late, as plain ASCII in its import tables, and no tool of Git Bash reads
-# those tables, so the names are read as strings. A runtime DLL's name met elsewhere in a
-# file (in a message) only adds a DLL to ship. The runtime's DLLs are those of the MSVC
-# redistributable: msvcp*, vcruntime*, concrt* and vcomp*.
+# those tables, so the names are read as strings. The runtime's DLLs are those of the MSVC
+# redistributable: msvcp*, vcruntime*, concrt* and vcomp*. Windows itself has DLLs that
+# match those patterns (msvcp_win.dll, msvcp110_win.dll, the *_clr0400.dll of .NET), which
+# no redistributable folder holds: names ending in _win.dll or _clr0400.dll are left out.
+# Another runtime DLL's name met elsewhere in a file (in a message) adds a DLL to ship, or,
+# if no redistributable version holds it, makes `copy` fail with the list it looked for.
 #
 # `copy` needs Visual Studio or its Build Tools with the C++ workload (vswhere.exe finds
 # them). Run in Git Bash on Windows.
@@ -40,9 +43,10 @@ names() {
             fail "expected a file to read the Visual C++ runtime DLLs it names at $file, found none"
         fi
     done
-    # grep exits 1 when the files name none; that is for the caller to judge.
+    # grep exits 1 when the files name none, or none is left; that is for the caller to
+    # judge. Windows' own DLLs that match (header) are dropped.
     { grep -a -o -h -i -E '(msvcp|vcruntime|concrt|vcomp)[0-9a-z_]*\.dll' "$@" || true; } |
-        tr '[:upper:]' '[:lower:]' | sort -u
+        tr '[:upper:]' '[:lower:]' | { grep -v -E '_(win|clr0400)\.dll$' || true; } | sort -u
 }
 
 # Copies into $1 the runtime DLLs that the files after it name, from the redistributable

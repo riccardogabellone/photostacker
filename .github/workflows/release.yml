@@ -101,7 +101,8 @@ jobs:
       # install-action has no cargo-packager. cargo-about's binary needs its `cli` feature.
       # They are built outside the repository and before the build inputs, so neither the
       # repository's .cargo/config.toml nor the build inputs' CMAKE_PREFIX_PATH and pkg-config
-      # path reaches their builds; rust-cache keeps the installed binaries for later runs.
+      # path reaches their builds. Off tags, rust-cache keeps the installed binaries for later
+      # runs; a tag, which restores no cache, builds them again.
       - name: cargo-about and cargo-packager
         working-directory: ${{ runner.temp }}
         run: |

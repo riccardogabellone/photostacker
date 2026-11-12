@@ -26,11 +26,11 @@
 # Needs cargo, cargo-packager 0.11.8 and cargo-about 0.9.3 (each `cargo install <tool>
 # --version <version> --locked`; cargo-about with `--features cli`), curl, and the network
 # (ONNX Runtime's archive, the licence files cargo-about fetches, cargo-packager's own
-# tools). Cargo builds into
-# CARGO_TARGET_DIR when it is set, else into <repo>/target. On Windows also: Visual Studio
-# or its Build Tools with the C++ workload (vswhere.exe finds them, and their redistributable
-# folder gives the Visual C++ runtime), VCPKG_ROOT set to the vcpkg root that
-# scripts/windows-heif.ps1 prints (libheif comes from there), and PowerShell 7 (pwsh).
+# tools). Cargo builds into CARGO_TARGET_DIR when it is set, else into <repo>/target. On
+# Windows also: Visual Studio or its Build Tools with the C++ workload (vswhere.exe finds
+# them, and their redistributable folder gives the Visual C++ runtime), VCPKG_ROOT set to
+# the vcpkg root that scripts/windows-heif.ps1 prints (libheif comes from there), and
+# PowerShell 7 (pwsh).
 #
 # macOS has bash 3.2 and BSD tools: no associative arrays, no mapfile, no readlink -f.
 set -euo pipefail

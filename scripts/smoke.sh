@@ -270,12 +270,13 @@ uninstall_nsis() {
     windows_command "$1/uninstall.exe" /S "_?=$(native "$1")"
 }
 
-# Unpacks the MSI $1 into the folder $2, which must have no space in its path, with
-# msiexec's administrative install (/a): it only writes the files into $2, as the MSI would
-# install them, plus a copy of the MSI. Nothing is installed, no registry key is written and
-# the system's list of apps does not change. msiexec returns before it is done unless it is
-# waited for, so PowerShell starts it and waits. On a failure, the end of msiexec's log ($3)
-# is printed.
+# Unpacks the MSI $1 into the folder $2 with msiexec's administrative install (/a): it only
+# writes the files into $2, as the MSI would install them, plus a copy of the MSI. Nothing
+# is installed, no registry key is written and the system's list of apps does not change.
+# msiexec returns before it is done unless it is waited for, so PowerShell starts it and
+# waits; the command line goes from PowerShell to msiexec, which takes a quoted path, spaces
+# and all, both as an argument and as a property's value (TARGETDIR="<folder>"). On a
+# failure, the end of msiexec's log ($3) is printed.
 unpack_msi() {
     local msi target log
     # Single quotes in a PowerShell string are doubled.
@@ -284,7 +285,7 @@ unpack_msi() {
     log=$(native "$3" | sed "s/'/''/g")
     windows_command "$powershell" -NoProfile -NonInteractive -Command "
         \$ErrorActionPreference = 'Stop'
-        \$arguments = '/a \"$msi\" /qn TARGETDIR=$target /l*v \"$log\"'
+        \$arguments = '/a \"$msi\" /qn TARGETDIR=\"$target\" /l*v \"$log\"'
         \$process = Start-Process -FilePath msiexec.exe -ArgumentList \$arguments -Wait -PassThru
         if (\$process.ExitCode -ne 0) {
             if (Test-Path -LiteralPath '$log') {
@@ -621,14 +622,10 @@ for package in "${packages[@]}"; do
             # (main.wxs), the unpack's root is TARGETDIR, the Program Files folder in it is
             # named PFiles, and INSTALLDIR, which holds every file, PFiles\Photostacker.
             root="$scratch/msi"
-            # msiexec takes TARGETDIR=<folder> unquoted, so it must have no space.
-            case "$(native "$root")" in
-                *' '*) fail "$name: expected a folder without spaces to unpack it into, found $(native "$root")" ;;
-            esac
             # msiexec's status can pass 255, which a shell's status cannot hold: the lines
             # before the failure give it.
             unpack_msi "$package" "$root" "$scratch/msi.log" ||
-                fail "$name: expected msiexec /a to unpack it into $(native "$root"), found it failed (the end of its log and its exit status are above)"
+                fail "$name: expected msiexec /a to unpack it into $(native "$root"), found it failed (the end of its log and its exit status are above; on a developer's machine, where an administrative unpack may need an elevated prompt, run this check from one)"
             bin_dir="$root/PFiles/Photostacker"
             if [ ! -f "$bin_dir/Photostacker.exe" ]; then
                 line=$(find "$root" -iname 'Photostacker.exe' | sed -n 1p)
