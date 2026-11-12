@@ -269,8 +269,9 @@ commands its `AGENTS.md` documents. Case by case:
 - **libheif on Windows** is built from vcpkg's `libheif` port: give vcpkg your
   libheif as that port, and build the app against it.
 - **libde265 on Linux** is the system's shared library: put your copy in place
-  of the system's `libde265.so.0` (or of the copy inside the AppImage), and
-  the app loads it, with no rebuild.
+  of the system's `libde265.so.0` (or, in an unpacked AppImage, of
+  `usr/lib/libde265.so.0`, the copy its executables load), and the app loads
+  it, with no rebuild.
 - **libde265 on Windows and macOS** is built in: build your copy the same way
   the project builds libde265 for that system (on Windows as vcpkg's
   `libde265` port, on macOS as a static library), and build the app against

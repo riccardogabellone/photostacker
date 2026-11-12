@@ -70,3 +70,117 @@ tempfile.workspace = true
 
 [target.'cfg(windows)'.build-dependencies]
 winresource.workspace = true
+
+# The packages, built with cargo-packager by scripts/package.sh (see packaging/README.md),
+# which runs it from this folder: the paths here are relative to it. The script builds
+# the two executables and stages the other files in dist/package first, so there is no
+# `before-packaging-command`, and passes the build and output folders itself.
+[package.metadata.packager]
+product-name = "Photostacker"
+identifier = "io.github.riccardogabellone.Photostacker"
+description = "Stack exposure brackets and bursts as layers in one PSD or TIFF"
+long-description = """
+Photostacker finds the series of one shot in a folder of photos (exposure brackets, HDR
+sets, fast bursts) and stacks each series as layers in one PSD, PSB or layered TIFF, ready
+for Photoshop or any editor that reads layers. It is a desktop app and a command-line tool.
+"""
+homepage = "https://github.com/riccardogabellone/photostacker"
+authors = ["Riccardo Gabellone"]
+publisher = "Riccardo Gabellone"
+# No `license-file`: cargo-packager would show it as a licence to accept, in both Windows
+# installers and before the disk image opens (where it would also stop a script's
+# `hdiutil attach`). The MIT licence asks for no acceptance, and every package carries it
+# in its licenses folder.
+category = "Photography"
+# The desktop app is the main binary: the packages, their launchers and the folder of
+# their other files (usr/lib/Photostacker on Linux) are named after it.
+binaries = [
+    { path = "Photostacker", main = true },
+    { path = "photostacker-cli" },
+]
+icons = [
+    "../../assets/icons/icon-32.png",
+    "../../assets/icons/icon-64.png",
+    "../../assets/icons/icon-128.png",
+    "../../assets/icons/icon-256.png",
+    "../../assets/icons/icon-512.png",
+    "../../assets/icons/icon.icns",
+    "../../assets/icons/icon.ico",
+]
+# Every file the script staged in dist/package/resources, at the same path in the
+# package's resource folder: beside the executables on Windows, usr/lib/Photostacker on
+# Linux, Contents/Resources on macOS, where the app looks (spec §8.3). A folder `src`
+# with a `target` puts the folder's contents under `target`; "." is the resource folder
+# itself.
+resources = [{ src = "../../dist/package/resources", target = "." }]
+
+[package.metadata.packager.macos]
+# ONNX Runtime goes to Contents/Frameworks, where the app looks for it (spec §8.3).
+frameworks = ["../../dist/package/frameworks/libonnxruntime.dylib"]
+# The oldest macOS the app runs on, as MACOSX_DEPLOYMENT_TARGET in .cargo/config.toml.
+minimum-system-version = "11.0"
+
+# The generated desktop entry and icons are named after the binary, but the desktop
+# matches a window to its launcher by the app ID (src/identity.rs), so the packages
+# ship packaging/linux/ files named after the ID instead.
+[package.metadata.packager.linux]
+generate-desktop-entry = false
+
+[package.metadata.packager.deb]
+package-name = "photostacker"
+section = "graphics"
+depends = [
+    # Linked by both executables (their NEEDED entries): libc6 also holds libm and the
+    # dynamic loader; libde265-0 is the HEVC decoder of HEIC photos, which libheif,
+    # built in, uses; libstdc++6 and libgcc-s1 come with libheif's C++. ONNX Runtime's
+    # library, which the package carries, links nothing more.
+    "libc6",
+    "libde265-0",
+    "libstdc++6",
+    "libgcc-s1",
+    # Loaded at run time by the window toolkit (winit and glutin open them by name), so
+    # nothing in the executables names them: OpenGL through EGL or GLX, and Wayland or X11.
+    "libegl1",
+    "libgl1",
+    "libwayland-client0",
+    "libwayland-egl1",
+    "libxkbcommon0",
+    "libxkbcommon-x11-0",
+    "libx11-6",
+    "libx11-xcb1",
+    "libxcursor1",
+    "libxi6",
+    "libxrandr2",
+]
+
+[package.metadata.packager.deb.files]
+"../../packaging/linux/io.github.riccardogabellone.Photostacker.desktop" = "usr/share/applications/io.github.riccardogabellone.Photostacker.desktop"
+"../../packaging/linux/io.github.riccardogabellone.Photostacker.metainfo.xml" = "usr/share/metainfo/io.github.riccardogabellone.Photostacker.metainfo.xml"
+"../../assets/logo/logo.svg" = "usr/share/icons/hicolor/scalable/apps/io.github.riccardogabellone.Photostacker.svg"
+"../../assets/icons/icon-16.png" = "usr/share/icons/hicolor/16x16/apps/io.github.riccardogabellone.Photostacker.png"
+"../../assets/icons/icon-24.png" = "usr/share/icons/hicolor/24x24/apps/io.github.riccardogabellone.Photostacker.png"
+"../../assets/icons/icon-32.png" = "usr/share/icons/hicolor/32x32/apps/io.github.riccardogabellone.Photostacker.png"
+"../../assets/icons/icon-48.png" = "usr/share/icons/hicolor/48x48/apps/io.github.riccardogabellone.Photostacker.png"
+"../../assets/icons/icon-64.png" = "usr/share/icons/hicolor/64x64/apps/io.github.riccardogabellone.Photostacker.png"
+"../../assets/icons/icon-128.png" = "usr/share/icons/hicolor/128x128/apps/io.github.riccardogabellone.Photostacker.png"
+"../../assets/icons/icon-256.png" = "usr/share/icons/hicolor/256x256/apps/io.github.riccardogabellone.Photostacker.png"
+"../../assets/icons/icon-512.png" = "usr/share/icons/hicolor/512x512/apps/io.github.riccardogabellone.Photostacker.png"
+
+[package.metadata.packager.appimage]
+# The Debian package depends on the system's libde265; the AppImage carries the build
+# host's copy (in usr/lib/<multiarch folder>). linuxdeploy, which makes the AppImage,
+# copies the libraries the executables link into usr/lib too, but for the base system's
+# (libc, libstdc++ and the like); naming libde265 here keeps it in the AppImage whatever
+# linuxdeploy decides.
+libs = ["libde265.so.0"]
+
+# The AppImage tooling looks for the desktop entry under the main binary's name.
+[package.metadata.packager.appimage.files]
+"../../packaging/linux/io.github.riccardogabellone.Photostacker.desktop" = "usr/share/applications/Photostacker.desktop"
+"../../assets/logo/logo.svg" = "usr/share/icons/hicolor/scalable/apps/io.github.riccardogabellone.Photostacker.svg"
+"../../assets/icons/icon-16.png" = "usr/share/icons/hicolor/16x16/apps/io.github.riccardogabellone.Photostacker.png"
+"../../assets/icons/icon-32.png" = "usr/share/icons/hicolor/32x32/apps/io.github.riccardogabellone.Photostacker.png"
+"../../assets/icons/icon-64.png" = "usr/share/icons/hicolor/64x64/apps/io.github.riccardogabellone.Photostacker.png"
+"../../assets/icons/icon-128.png" = "usr/share/icons/hicolor/128x128/apps/io.github.riccardogabellone.Photostacker.png"
+"../../assets/icons/icon-256.png" = "usr/share/icons/hicolor/256x256/apps/io.github.riccardogabellone.Photostacker.png"
+"../../assets/icons/icon-512.png" = "usr/share/icons/hicolor/512x512/apps/io.github.riccardogabellone.Photostacker.png"

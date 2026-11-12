@@ -1,0 +1,520 @@
+#!/usr/bin/env bash
+# Checks built packages before anyone installs them (packaging/README.md):
+#
+#   scripts/smoke.sh [--install] <package>...
+#
+# Each package is opened by its kind, on the system it is for:
+#   .deb            dpkg -x into a scratch folder; with --install, apt-get installs it instead
+#                   (as root, or through sudo) and removes it afterwards
+#   .AppImage       --appimage-extract in a scratch folder; the tool then runs from the tree
+#                   with LD_LIBRARY_PATH at the tree's own libraries, as the AppImage's
+#                   launcher sets it
+#   .dmg            hdiutil attach, read-only, on a scratch mount point, detached on every exit
+#   -setup.exe      the NSIS installer: a silent install into a scratch folder, then a silent
+#                   uninstall
+#   .msi            only checked to exist and not be empty: installing it needs elevation
+#   -portable.zip   Expand-Archive into a scratch folder
+# and then checked:
+#   contents   both executables; ONNX Runtime's library where the app looks for it and the
+#              eight files of the licenses folder (spec §8.3, §11.3); on Windows the Visual
+#              C++ runtime; in the AppImage, libde265.so.0
+#   links      Linux: each executable links only the C and C++ runtimes and libde265; macOS:
+#              only the system's own libraries; Windows: no libheif, libde265 or x265 DLL in
+#              the package, and the tool runs with a PATH of Windows' own folders only
+#   macOS      the minimum macOS of every Mach-O file: 11.0, but 14.0 for ONNX Runtime on
+#              Apple silicon
+#   runs       `photostacker-cli info` names the version in the package's name, libde265,
+#              and the ONNX Runtime of scripts/onnxruntime.tsv for this system, loaded from
+#              the package; `photostacker-cli run crates/core/tests/fixtures/heic --dry-run`
+#              succeeds, and its plan lists every HEIC file there, with no error
+#
+# Every check prints one line. The first that fails prints what it expected and what it
+# found, and the script exits 1. The tool runs with ORT_DYLIB_PATH unset and its data folder
+# in the scratch folder, which is removed at the end.
+#
+# Needs: Linux: dpkg, objdump (binutils), ldd. macOS: hdiutil, otool, file. Windows (Git
+# Bash): cygpath, and PowerShell for the zip.
+#
+# macOS has bash 3.2 and BSD tools: no associative arrays, no mapfile, no readlink -f.
+set -euo pipefail
+
+fail() {
+    echo "FAILED: $*" >&2
+    exit 1
+}
+
+ok() {
+    echo "ok: $*"
+}
+
+usage() {
+    echo "usage: $0 [--install] <package>..." >&2
+    exit 2
+}
+
+install=0
+if [ "${1:-}" = --install ]; then
+    install=1
+    shift
+fi
+if [ "$#" = 0 ]; then
+    usage
+fi
+
+repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+fixtures="$repo/crates/core/tests/fixtures/heic"
+
+case "$(uname -s)" in
+    Linux) os=linux exe= library=libonnxruntime.so ;;
+    Darwin) os=macos exe= library=libonnxruntime.dylib ;;
+    MINGW* | MSYS*) os=windows exe=.exe library=onnxruntime.dll ;;
+    *) fail "packages are checked on Linux, Windows and macOS, not on $(uname -s)" ;;
+esac
+case "$(uname -m)" in
+    x86_64 | amd64) arch=x86_64 ;;
+    arm64 | aarch64) arch=aarch64 ;;
+    *) arch=$(uname -m) ;;
+esac
+
+# The ONNX Runtime the package must carry: this system's row of scripts/onnxruntime.tsv.
+ort_version=
+while IFS=$'\t' read -r row_os row_arch row_version _ || [ -n "${row_os:-}" ]; do
+    case "$row_os" in '' | '#'*) continue ;; esac
+    if [ "$row_os" = "$os" ] && [ "$row_arch" = "$arch" ]; then
+        ort_version=$row_version
+        break
+    fi
+done <"$repo/scripts/onnxruntime.tsv"
+if [ -z "$ort_version" ]; then
+    fail "scripts/onnxruntime.tsv pins no ONNX Runtime build for $os $arch"
+fi
+
+# The packages by absolute path, before anything changes folder.
+packages=()
+for package in "$@"; do
+    case "$package" in
+        /*) packages+=("$package") ;;
+        *) packages+=("$(pwd)/$package") ;;
+    esac
+done
+
+# A path in the form native programs print and take: Windows form on Windows.
+native() {
+    if [ "$os" = windows ]; then
+        cygpath -w "$1"
+    else
+        printf '%s\n' "$1"
+    fi
+}
+
+if [ "$os" = windows ]; then
+    # Under the repository: the system's temporary folder may be named in its short 8.3
+    # form, which the tool would not print back, and the installer's /D= takes no space.
+    mkdir -p "$repo/dist"
+    scratch=$(mktemp -d "$repo/dist/smoke.XXXXXX")
+    case "$(native "$scratch")" in
+        *' '*) fail "the scratch folder $(native "$scratch") has a space in it, which the NSIS installer's /D= cannot take" ;;
+    esac
+    if command -v pwsh >/dev/null 2>&1; then
+        powershell=pwsh
+    else
+        powershell=powershell.exe
+    fi
+    # Windows' own folders: the tool must run with nothing else on the PATH.
+    system_root=$(cygpath -u "${SYSTEMROOT:-C:\\Windows}")
+    windows_path="$system_root/System32:$system_root"
+else
+    tmp=${TMPDIR:-/tmp}
+    scratch=$(mktemp -d "${tmp%/}/photostacker-smoke.XXXXXX")
+fi
+
+# What a failed or interrupted run must not leave behind.
+mounted=        # the disk image's mount point, while it may be attached
+nsis_dir=       # an NSIS install, until it is uninstalled
+deb_installed=0 # the Debian package, installed with --install
+sudo=
+cleanup() {
+    local status=$?
+    if [ -n "$mounted" ]; then
+        hdiutil detach "$mounted" -quiet 2>/dev/null || hdiutil detach "$mounted" -force -quiet 2>/dev/null || true
+    fi
+    if [ -n "$nsis_dir" ]; then
+        uninstall_nsis "$nsis_dir" >/dev/null 2>&1 || true
+    fi
+    if [ "$deb_installed" = 1 ]; then
+        $sudo apt-get remove -y photostacker >/dev/null 2>&1 || true
+    fi
+    rm -rf "$scratch" || true
+    exit "$status"
+}
+trap cleanup EXIT
+# A signal ends the script through exit, so the EXIT trap cleans up.
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# The tool must find the package's own ONNX Runtime, never a developer's.
+unset ORT_DYLIB_PATH
+PHOTOSTACKER_DATA_DIR=$(native "$scratch/data")
+export PHOTOSTACKER_DATA_DIR
+
+# Runs NSIS's silent uninstaller of the install in $1 in place (`_?=`, which must come last
+# and unquoted), so it ends before this returns; it leaves itself behind.
+uninstall_nsis() {
+    MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' "$1/uninstall.exe" /S "_?=$(native "$1")"
+}
+
+# What is at $1, for a failure's "found".
+describe() {
+    if [ -L "$1" ]; then
+        echo "a link"
+    elif [ -d "$1" ]; then
+        echo "a folder"
+    elif [ -f "$1" ] && [ ! -s "$1" ]; then
+        echo "an empty file"
+    elif [ -e "$1" ]; then
+        echo "something else"
+    else
+        echo "nothing"
+    fi
+}
+
+# $1 must be a file that is not empty and not a link: the package carries the file itself.
+expect_file() {
+    if [ -L "$1" ] || [ ! -f "$1" ] || [ ! -s "$1" ]; then
+        fail "$2: expected a file at $1, found $(describe "$1")"
+    fi
+}
+
+check_contents() {
+    local name
+    for name in Photostacker photostacker-cli; do
+        expect_file "$bin_dir/$name$exe" "contents"
+        if [ "$os" != windows ] && [ ! -x "$bin_dir/$name$exe" ]; then
+            fail "contents: expected $bin_dir/$name$exe to be executable, found it is not"
+        fi
+    done
+    expect_file "$lib_dir/$library" "contents"
+    for name in LICENSE THIRD-PARTY-NOTICES.md THIRD-PARTY-LICENSES.md LGPL-2.1.txt LGPL-3.0.txt \
+        GPL-3.0.txt onnxruntime-LICENSE.txt onnxruntime-ThirdPartyNotices.txt; do
+        expect_file "$res_dir/licenses/$name" "contents"
+    done
+    ok "contents: Photostacker$exe and photostacker-cli$exe in $bin_dir, $library in $lib_dir, the eight licence files in $res_dir/licenses"
+    if [ "$os" = windows ]; then
+        for name in msvcp140.dll msvcp140_1.dll vcruntime140.dll vcruntime140_1.dll; do
+            expect_file "$bin_dir/$name" "contents"
+        done
+        ok "contents: the Visual C++ runtime (msvcp140.dll, msvcp140_1.dll, vcruntime140.dll, vcruntime140_1.dll) in $bin_dir"
+    fi
+}
+
+# Linux: the libraries each executable names (NEEDED) are the C and C++ runtimes and
+# libde265, which the Debian package depends on and the AppImage carries.
+check_links_linux() {
+    local name dump needed lib
+    command -v objdump >/dev/null 2>&1 || fail "links: objdump (binutils) is needed to read what the executables link"
+    for name in Photostacker photostacker-cli; do
+        dump=$(objdump -p "$bin_dir/$name") || fail "links: objdump could not read $bin_dir/$name"
+        needed=$(printf '%s\n' "$dump" | awk '$1 == "NEEDED" { print $2 }')
+        if [ -z "$needed" ]; then
+            fail "links: expected $name to name the libraries it links, found none"
+        fi
+        for lib in $needed; do
+            case "$lib" in
+                libde265.so.0 | libm.so.* | libstdc++.so.* | libgcc_s.so.* | libc.so.* | ld-linux* | \
+                    libdl.so.* | libpthread.so.* | librt.so.*) ;;
+                *) fail "links: expected $name to link only libde265, libm, libstdc++, libgcc_s, libc, ld-linux, libdl, libpthread and librt, found $lib" ;;
+            esac
+        done
+        ok "links: $name links only" $needed
+    done
+}
+
+# macOS: each executable links only the system's own libraries. `otool -L`'s first line
+# names the file itself.
+check_links_macos() {
+    local name libs lib
+    for name in Photostacker photostacker-cli; do
+        libs=$(otool -L "$bin_dir/$name" | tail -n +2 | awk '{ print $1 }') ||
+            fail "links: otool could not read $bin_dir/$name"
+        if [ -z "$libs" ]; then
+            fail "links: expected $name to name the libraries it links, found none"
+        fi
+        for lib in $libs; do
+            case "$lib" in
+                /usr/lib/* | /System/Library/*) ;;
+                *) fail "links: expected $name to link only libraries under /usr/lib/ and /System/Library/, found $lib" ;;
+            esac
+        done
+        ok "links: $name links only libraries under /usr/lib/ and /System/Library/"
+    done
+}
+
+# Windows: no tool here reads a DLL's imports, so: no HEIC library ships as a DLL (libheif
+# and libde265 are built in), and the runs below have only Windows' own folders on the PATH.
+check_links_windows() {
+    local found
+    found=$(find "$root" -type f \( -iname '*heif*.dll' -o -iname '*de265*.dll' -o -iname '*x265*.dll' \))
+    if [ -n "$found" ]; then
+        fail "links: expected no libheif, libde265 or x265 DLL in the package, found $found"
+    fi
+    ok "links: no libheif, libde265 or x265 DLL in the package; the tool runs below with PATH=$windows_path only"
+}
+
+# The oldest macOS a Mach-O file runs on, as otool writes it: LC_BUILD_VERSION's minos, or
+# LC_VERSION_MIN_MACOSX's version.
+minimum_macos() {
+    otool -l "$1" | awk '
+        $1 == "cmd" { cmd = $2 }
+        !found && cmd == "LC_BUILD_VERSION" && $1 == "minos" { print $2; found = 1 }
+        !found && cmd == "LC_VERSION_MIN_MACOSX" && $1 == "version" { print $2; found = 1 }'
+}
+
+check_minimum_macos() {
+    local file expected minos count=0
+    while IFS= read -r file; do
+        case "$(file -b "$file")" in
+            *Mach-O*) ;;
+            *) continue ;;
+        esac
+        expected=11.0
+        if [ "$(basename "$file")" = libonnxruntime.dylib ] && [ "$arch" = aarch64 ]; then
+            expected=14.0
+        fi
+        minos=$(minimum_macos "$file")
+        if [ "$minos" != "$expected" ]; then
+            fail "macOS: expected $file to need macOS $expected, found ${minos:-no minimum}"
+        fi
+        ok "macOS: ${file#"$root"/} needs macOS $minos"
+        count=$((count + 1))
+    done <<EOF
+$(find "$root" -type f)
+EOF
+    if [ "$count" -lt 3 ]; then
+        fail "macOS: expected the two executables and ONNX Runtime among the Mach-O files, found $count Mach-O files"
+    fi
+}
+
+# Runs photostacker-cli of the package with its arguments, as the package would: on Windows
+# with only Windows' own folders on the PATH, from an AppImage's tree with its libraries.
+run_cli() {
+    if [ "$os" = windows ]; then
+        PATH="$windows_path" "$bin_dir/photostacker-cli$exe" "$@"
+    elif [ -n "$library_path" ]; then
+        LD_LIBRARY_PATH="$library_path" "$bin_dir/photostacker-cli$exe" "$@"
+    else
+        "$bin_dir/photostacker-cli$exe" "$@"
+    fi
+}
+
+# Where the tool must say it loaded ONNX Runtime from: the folder of spec §8.3 beside the
+# executable's, joined, not resolved. On Linux and macOS the executable's own folder is
+# resolved first (links followed); Windows takes it as it is.
+expected_library() {
+    local exe_dir
+    case "$os" in
+        linux)
+            exe_dir=$(cd "$bin_dir" && pwd -P)
+            printf '%s\n' "$exe_dir/../lib/Photostacker/$library"
+            ;;
+        macos)
+            exe_dir=$(cd "$bin_dir" && pwd -P)
+            printf '%s\n' "$exe_dir/../Frameworks/$library"
+            ;;
+        windows) printf '%s\n' "$(native "$bin_dir")\\$library" ;;
+    esac
+}
+
+# A path as compared: on Windows without regard to case or the kind of slash.
+comparable() {
+    if [ "$os" = windows ]; then
+        printf '%s\n' "$1" | tr '\\' '/' | tr '[:upper:]' '[:lower:]'
+    else
+        printf '%s\n' "$1"
+    fi
+}
+
+check_runs() {
+    local info status line expected plan errors heic name pattern
+    info=$(run_cli info 2>"$scratch/info.log") || {
+        status=$?
+        cat "$scratch/info.log" >&2
+        fail "runs: expected photostacker-cli info to succeed, found exit status $status"
+    }
+    info=$(printf '%s\n' "$info" | tr -d '\r')
+
+    line=$(printf '%s\n' "$info" | sed -n 1p)
+    if [ "$line" != "photostacker-cli $version" ]; then
+        fail "runs: expected \"photostacker-cli $version\" from info, found \"$line\""
+    fi
+    ok "runs: info says photostacker-cli $version"
+
+    line=$(printf '%s\n' "$info" | grep '^heic: ' || true)
+    case "$line" in
+        "heic: libheif "*", HEVC decoder libde265") ;;
+        *) fail "runs: expected \"heic: libheif <version>, HEVC decoder libde265\" from info, found \"$line\"" ;;
+    esac
+    ok "runs: info says $line"
+
+    line=$(printf '%s\n' "$info" | grep '^visual check: ' || true)
+    expected="visual check: ONNX Runtime $ort_version at $(expected_library)"
+    if [ "$(comparable "$line")" != "$(comparable "$expected")" ]; then
+        fail "runs: expected \"$expected\" from info, found \"$line\""
+    fi
+    ok "runs: info says $line"
+
+    plan="$scratch/plan.json"
+    run_cli run "$(native "$fixtures")" --dry-run >"$plan" 2>"$scratch/run.log" || {
+        status=$?
+        cat "$scratch/run.log" >&2
+        fail "runs: expected photostacker-cli run $fixtures --dry-run to succeed, found exit status $status"
+    }
+    # The plan lists each file it read and grouped as a string of its own on a line, in a
+    # group's files or in unstacked; a file it could not read goes to errors instead, as an
+    # object with its file and the error.
+    tr -d '\r' <"$plan" >"$plan.lf"
+    errors=$(awk '
+        /^  "errors": \[\]/ { print; next }
+        /^  "errors": \[/ { inside = 1 }
+        inside { print }
+        inside && /^  \]/ { inside = 0 }' "$plan.lf" | tr '\n' ' ' | tr -s ' ')
+    for heic in "$fixtures"/*.heic; do
+        name=$(basename "$heic")
+        pattern="^[[:space:]]*\"$(printf '%s\n' "$name" | sed 's/[.]/\\./g')\",?$"
+        if ! grep -Eq "$pattern" "$plan.lf"; then
+            fail "runs: expected the dry run's plan to list $name among the files it read, found it does not; the plan's$errors"
+        fi
+    done
+    if ! grep -Eq '^  "errors": \[\],?$' "$plan.lf"; then
+        fail "runs: expected the dry run's plan to have no errors, found$errors"
+    fi
+    ok "runs: a dry run over $fixtures read every HEIC file there, with no error"
+}
+
+for package in "${packages[@]}"; do
+    name=$(basename "$package")
+    echo "== $name"
+    if [ ! -f "$package" ]; then
+        fail "$name: expected a package at $package, found $(describe "$package")"
+    fi
+    rest=${name#Photostacker_}
+    version=${rest%%_*}
+    if [ "$rest" = "$name" ] || [ "$version" = "$rest" ] || [ -z "$version" ]; then
+        fail "$name: expected a name Photostacker_<version>_..., found $name"
+    fi
+
+    root= bin_dir= lib_dir= res_dir= library_path=
+    case "$os:$name" in
+        linux:*.deb)
+            if [ "$install" = 1 ]; then
+                if [ "$(id -u)" != 0 ]; then
+                    sudo=sudo
+                fi
+                deb_installed=1
+                DEBIAN_FRONTEND=noninteractive $sudo apt-get install -y "$package" >/dev/null ||
+                    fail "$name: expected apt-get to install it, found it failed"
+                root=/ bin_dir=/usr/bin lib_dir=/usr/lib/Photostacker
+                ok "installed with apt-get"
+            else
+                root="$scratch/deb"
+                dpkg -x "$package" "$root" || fail "$name: expected dpkg -x to unpack it, found it failed"
+                bin_dir="$root/usr/bin" lib_dir="$root/usr/lib/Photostacker"
+                ok "unpacked with dpkg -x into $root"
+            fi
+            res_dir=$lib_dir
+            ;;
+        linux:*.AppImage)
+            mkdir "$scratch/appimage"
+            # A copy, made executable: a downloaded file may have lost its mode.
+            cp "$package" "$scratch/appimage/package.AppImage"
+            chmod +x "$scratch/appimage/package.AppImage"
+            (cd "$scratch/appimage" && ./package.AppImage --appimage-extract >/dev/null) ||
+                fail "$name: expected --appimage-extract to unpack it, found it failed"
+            rm "$scratch/appimage/package.AppImage"
+            root="$scratch/appimage/squashfs-root"
+            bin_dir="$root/usr/bin" lib_dir="$root/usr/lib/Photostacker"
+            res_dir=$lib_dir library_path="$root/usr/lib"
+            ok "unpacked with --appimage-extract into $root"
+            ;;
+        macos:*.dmg)
+            mkdir "$scratch/dmg"
+            mounted="$scratch/dmg"
+            hdiutil attach -nobrowse -readonly -noautoopen -mountpoint "$mounted" "$package" >/dev/null ||
+                fail "$name: expected hdiutil to attach it, found it failed"
+            root="$mounted/Photostacker.app"
+            bin_dir="$root/Contents/MacOS" lib_dir="$root/Contents/Frameworks"
+            res_dir="$root/Contents/Resources"
+            ok "attached at $mounted"
+            ;;
+        windows:*-setup.exe)
+            root="$scratch/nsis"
+            nsis_dir=$root
+            # /NS: no shortcuts. /D= must come last, unquoted.
+            MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' "$package" /S /NS "/D=$(native "$root")" ||
+                fail "$name: expected the silent install to succeed, found exit status $?"
+            bin_dir=$root lib_dir=$root res_dir=$root
+            ok "installed silently into $(native "$root")"
+            ;;
+        windows:*.msi)
+            if [ ! -s "$package" ]; then
+                fail "$name: expected an installer, found an empty file"
+            fi
+            ok "$name exists and is not empty; it is not installed here, which needs elevation"
+            continue
+            ;;
+        windows:*-portable.zip)
+            root="$scratch/zip"
+            from=$(native "$package" | sed "s/'/''/g")
+            to=$(native "$root" | sed "s/'/''/g")
+            MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' "$powershell" -NoProfile -NonInteractive -Command \
+                "\$ErrorActionPreference = 'Stop'; Expand-Archive -LiteralPath '$from' -DestinationPath '$to'" ||
+                fail "$name: expected Expand-Archive to unpack it, found it failed"
+            bin_dir=$root lib_dir=$root res_dir=$root
+            ok "unpacked with Expand-Archive into $(native "$root")"
+            ;;
+        *) fail "$name: expected a package for $os (.deb, .AppImage; -setup.exe, .msi, -portable.zip; .dmg), found $name" ;;
+    esac
+
+    check_contents
+    case "$os" in
+        linux) check_links_linux ;;
+        macos)
+            check_links_macos
+            check_minimum_macos
+            ;;
+        windows) check_links_windows ;;
+    esac
+    if [ -n "$library_path" ]; then
+        # The AppImage carries libde265, and its own copy is the one its tool loads.
+        line=$(find "$root/usr/lib" -name libde265.so.0 -type f)
+        if [ -z "$line" ]; then
+            fail "contents: expected libde265.so.0 in $root/usr/lib, found none"
+        fi
+        line=$(LD_LIBRARY_PATH="$library_path" ldd "$bin_dir/photostacker-cli" | awk '$1 == "libde265.so.0" { print $3 }')
+        case "$line" in
+            "$root"/*) ok "contents: the AppImage carries libde265.so.0, and its tool loads $line" ;;
+            *) fail "contents: expected the AppImage's tool to load its own libde265.so.0, found ${line:-none}" ;;
+        esac
+    fi
+    check_runs
+
+    if [ -n "$mounted" ]; then
+        hdiutil detach "$mounted" -quiet || fail "$name: expected hdiutil to detach $mounted, found it failed"
+        mounted=
+        ok "detached"
+    fi
+    if [ -n "$nsis_dir" ]; then
+        uninstall_nsis "$nsis_dir" || fail "$name: expected the silent uninstall to succeed, found exit status $?"
+        if [ -e "$nsis_dir/Photostacker.exe" ]; then
+            fail "$name: expected the uninstaller to remove Photostacker.exe, found it is still there"
+        fi
+        nsis_dir=
+        ok "uninstalled silently"
+    fi
+    if [ "$deb_installed" = 1 ]; then
+        $sudo apt-get remove -y photostacker >/dev/null || fail "$name: expected apt-get to remove it, found it failed"
+        deb_installed=0
+        ok "removed with apt-get"
+    fi
+done
+echo "All checks passed."

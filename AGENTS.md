@@ -14,16 +14,17 @@ The design specification is [docs/design.md](docs/design.md). The code and the t
   - Its tests: `tests/controller.rs` (no window), `tests/interaction.rs` (`egui_kittest`: the real widgets over a real engine, end-to-end runs included), `tests/thumbs.rs`. `tests/common/` is what they share, and `tests/screens/` the screens of the screenshot example, which `interaction.rs` draws too.
 - `crates/testkit/`: dev-only fixtures (synthetic EXIF/TIFF bytes and scenes); a dev-dependency, never published.
 - `assets/`: the font, the icons, the logo's sources ([assets/logo/AGENTS.md](assets/logo/AGENTS.md)) and the README's screenshot.
-- `packaging/linux/`: the desktop entry, named after the app id.
+- `packaging/`: how the packages are built and checked ([packaging/README.md](packaging/README.md)); the packager's configuration is in `crates/ui/Cargo.toml`.
+- `packaging/linux/`: the desktop entry and the AppStream file, named after the app id.
 - `packaging/licenses/`: the Free Software Foundation's texts of the LGPL-2.1, LGPL-3.0 and GPL-3.0, unchanged, which every package's `licenses` folder holds, and the template of `THIRD-PARTY-LICENSES.md` (spec §11.3).
-- `scripts/`: the Windows build ([scripts/win.ps1](scripts/win.ps1)) and its vcpkg for HEIC ([scripts/windows-heif.ps1](scripts/windows-heif.ps1)), the pinned ONNX Runtime builds and the script that fetches them ([scripts/ort.sh](scripts/ort.sh)), the stand-in readers ([scripts/standins/](scripts/standins/)), and the scripts that fetch the public camera files and generate the tests' golden files.
+- `scripts/`: the Windows build ([scripts/win.ps1](scripts/win.ps1)) and its vcpkg for HEIC ([scripts/windows-heif.ps1](scripts/windows-heif.ps1)), the pinned ONNX Runtime builds and the script that fetches them ([scripts/ort.sh](scripts/ort.sh)), the packages' build and check ([scripts/package.sh](scripts/package.sh), [scripts/smoke.sh](scripts/smoke.sh)), the stand-in readers ([scripts/standins/](scripts/standins/)), and the scripts that fetch the public camera files and generate the tests' golden files.
 - `docs/`: the specification, the [history](docs/history.md), the [calibration](docs/calibration.md) of the thresholds, the [checks in other programs](docs/photoshop-checks.md) and the [EXIF coverage](docs/exif-fixture-coverage.md).
 
 The app's data (the job database, the models, the logs) lives in the platform's data folder, and its thumbnails in the cache folder (spec §7.1). `PHOTOSTACKER_DATA_DIR` moves both, for the app and the CLI alike: set it to a scratch folder for every run you start while developing, so a real user's data is never touched.
 
 ## Environment
 
-- **Toolchain:** stable Rust, 1.99 or later (`rust-version` in [Cargo.toml](Cargo.toml)), [just](https://github.com/casey/just), [cargo-nextest](https://nexte.st), [cargo-deny](https://github.com/EmbarkStudios/cargo-deny) (`cargo install cargo-deny --locked`) and, to make the licences file of the packages, [cargo-about](https://github.com/EmbarkStudios/cargo-about) (`cargo install cargo-about --locked --features cli`).
+- **Toolchain:** stable Rust, 1.99 or later (`rust-version` in [Cargo.toml](Cargo.toml)), [just](https://github.com/casey/just), [cargo-nextest](https://nexte.st), [cargo-deny](https://github.com/EmbarkStudios/cargo-deny) (`cargo install cargo-deny --locked`) and, to make the licences file of the packages, [cargo-about](https://github.com/EmbarkStudios/cargo-about) (`cargo install cargo-about --locked --features cli`); to build the packages, [cargo-packager](https://github.com/crabnebula-dev/cargo-packager) 0.11.8 (`cargo install cargo-packager --version 0.11.8 --locked`).
 - **Linux packages:** `sudo apt install build-essential cmake pkg-config libde265-dev libegl1 zenity`.
   - `zenity` gives the app its file dialogs where there is no XDG desktop portal; without either, the app says that no file dialog is available.
   - `libimage-exiftool-perl` is needed only to regenerate the EXIF golden file. ExifTool is never a build or run-time dependency.
@@ -47,6 +48,8 @@ just test -E 'test(model::)'  # extra arguments go to nextest
 just test --no-default-features  # the same tests without ml and heic
 just deny                     # cargo deny check: licences, advisories, bans and sources (deny.toml); needs the network
 just licences                 # the crates' licences, with their texts (about.toml), into dist/package/resources/licenses/THIRD-PARTY-LICENSES.md; needs the network
+just package deb,appimage     # this system's packages into dist/packages (dmg on macOS; scripts/package.sh nsis,wix in Git Bash on Windows); packaging/README.md
+just smoke dist/packages/*.deb dist/packages/*.AppImage  # check built packages: contents, links, a run of the CLI from each
 
 PHOTOSTACKER_DATA_DIR=<scratch> just run          # the desktop app, release build
 just run-cli --help                                # the CLI, release build; arguments go to the binary

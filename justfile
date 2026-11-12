@@ -41,13 +41,22 @@ test *ARGS:
 deny:
     cargo deny check
 
-# cargo-about (`cargo install cargo-about --locked --features cli`) reads about.toml and the template in
-# packaging/licenses. It needs the network: it fetches from GitHub the licence files that some crates
-# leave out of their package (about.toml's `git` clarifications). Not part of `check`.
+# scripts/licences.sh runs cargo-about (`cargo install cargo-about --locked --features cli`), which reads
+# about.toml and the template in packaging/licenses. It needs the network: it fetches from GitHub the
+# licence files that some crates leave out of their package (about.toml's `git` clarifications). Not
+# part of `check`. scripts/package.sh runs the same script.
 # Write the licences of the Rust crates the packages ship, with their texts, to dist/package/resources/licenses/THIRD-PARTY-LICENSES.md (spec §11.3).
 licences:
-    mkdir -p dist/package/resources/licenses
-    cargo about generate --workspace --locked --fail --config about.toml --output-file dist/package/resources/licenses/THIRD-PARTY-LICENSES.md packaging/licenses/about.hbs
+    scripts/licences.sh
+
+# scripts/package.sh: needs cargo-packager 0.11.8 (`cargo install cargo-packager --version 0.11.8 --locked`), cargo-about and the network. It empties dist/package and dist/packages first.
+# Build this system's packages into dist/packages: deb,appimage on Linux, nsis,wix on Windows, dmg on macOS (packaging/README.md).
+package FORMATS:
+    scripts/package.sh "$1"
+
+# Check built packages before anyone installs them: what they hold, what they link, and a run of the command-line tool from each; --install installs a .deb with apt-get instead of unpacking it (packaging/README.md).
+smoke *ARGS:
+    scripts/smoke.sh "$@"
 
 # Run the desktop app in release mode; arguments go to the binary.
 run *ARGS:
