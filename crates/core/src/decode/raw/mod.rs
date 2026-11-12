@@ -295,7 +295,6 @@ mod tests {
         assert!(source.buf() == original.as_slice());
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_raw_over_the_budget_is_refused_unread() {
         // Sparse, so neither disk space nor memory is used; a read of it
@@ -303,7 +302,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("huge.nef");
         let len = crate::budget::DECODE_MEMORY_BUDGET + 1;
-        fs::File::create(&path).unwrap().set_len(len).unwrap();
+        photostacker_testkit::sparse_file(&path, len).unwrap();
         let too_large = |err: &DecodeError| match err {
             DecodeError::Unsupported(why) => why.contains("too large to decode"),
             _ => false,

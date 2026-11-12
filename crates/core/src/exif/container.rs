@@ -544,7 +544,7 @@ mod tests {
         let path = dir.path().join("huge.tif");
         let len = crate::budget::DECODE_MEMORY_BUDGET + 1;
         // Sparse: no disk space and no memory is used.
-        File::create(&path).unwrap().set_len(len).unwrap();
+        photostacker_testkit::sparse_file(&path, len).unwrap();
         let err = read_file(&path).unwrap_err();
         assert!(
             matches!(err, ExifError::TooLarge { len: l } if l == len),

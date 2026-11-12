@@ -323,7 +323,7 @@ fn models_downloading(dirs: &AppDirs) -> Result<Prepared, String> {
     let file = models::model_file(&dirs.models(), base);
     let sparse = |file: &Path| -> std::io::Result<()> {
         fs::create_dir_all(file.parent().unwrap_or(file))?;
-        fs::File::create(file)?.set_len(base.size)
+        photostacker_testkit::sparse_file(file, base.size)
     };
     sparse(&file).map_err(|error| format!("{}: {error}", file.display()))?;
     Ok(Prepared {
@@ -405,7 +405,7 @@ impl ModelInstall for ScreenInstaller {
         fs::create_dir_all(&folder)?;
         // Rounded up, so the whole percent is HELD_PERCENT exactly.
         let done = (spec.size * HELD_PERCENT).div_ceil(100);
-        fs::File::create(folder.join("model.onnx.part"))?.set_len(done)?;
+        photostacker_testkit::sparse_file(&folder.join("model.onnx.part"), done)?;
         progress(done, spec.size);
         while !cancel.load(Ordering::SeqCst) {
             thread::sleep(Duration::from_millis(50));

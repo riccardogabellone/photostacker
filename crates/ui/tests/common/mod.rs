@@ -242,7 +242,7 @@ impl FakeInstaller {
     ) -> Result<PathBuf, ModelError> {
         let part = models_dir.join(spec.id).join("model.onnx.part");
         std::fs::create_dir_all(part.parent().unwrap())?;
-        std::fs::File::create(&part)?.set_len(spec.size / 2)?;
+        photostacker_testkit::sparse_file(&part, spec.size / 2)?;
         progress(spec.size / 2, spec.size);
         loop {
             if cancel.load(Ordering::SeqCst) {
@@ -308,10 +308,7 @@ impl ModelInstall for FakeInstaller {
 pub fn place_model(models_dir: &Path, spec: &ModelSpec) -> PathBuf {
     let file = models::model_file(models_dir, spec);
     std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-    std::fs::File::create(&file)
-        .unwrap()
-        .set_len(spec.size)
-        .unwrap();
+    photostacker_testkit::sparse_file(&file, spec.size).unwrap();
     file
 }
 

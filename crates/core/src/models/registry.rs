@@ -188,7 +188,7 @@ mod tests {
     fn place_model_file(models_dir: &Path, spec: &ModelSpec, len: u64) {
         let path = model_file(models_dir, spec);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::File::create(&path).unwrap().set_len(len).unwrap();
+        photostacker_testkit::sparse_file(&path, len).unwrap();
     }
 
     #[test]

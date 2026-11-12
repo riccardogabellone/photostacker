@@ -223,10 +223,8 @@ mod tests {
         let spec = &MODELS[1];
         let file = models::model_file(dir.path(), spec);
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-        std::fs::File::create(&file)
-            .unwrap()
-            .set_len(spec.size)
-            .unwrap();
+        // Sparse: the model's size costs no disk.
+        photostacker_testkit::sparse_file(&file, spec.size).unwrap();
         let lines = list_lines(dir.path());
         assert!(lines[0].ends_with("installed: no"), "{lines:?}");
         assert!(lines[1].ends_with("installed: yes"), "{lines:?}");

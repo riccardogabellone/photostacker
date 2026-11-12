@@ -3969,7 +3969,7 @@ fn corrupt_installed_model_means_skipped_with_one_warning() {
     let spec = models::model(MODEL).unwrap();
     let file = models::model_file(&dirs.models(), spec);
     fs::create_dir_all(file.parent().unwrap()).unwrap();
-    fs::File::create(&file).unwrap().set_len(spec.size).unwrap();
+    photostacker_testkit::sparse_file(&file, spec.size).unwrap();
     assert!(models::installed(&dirs.models(), spec));
     let input = stage3_folder();
     let review = Review::start(&dirs, ml_config(input.path(), NEAR));
@@ -4565,7 +4565,7 @@ fn poll(what: &str, done: impl Fn() -> bool) {
 fn place_model(models_dir: &Path, spec: &ModelSpec) -> PathBuf {
     let file = models::model_file(models_dir, spec);
     fs::create_dir_all(file.parent().unwrap()).unwrap();
-    fs::File::create(&file).unwrap().set_len(spec.size).unwrap();
+    photostacker_testkit::sparse_file(&file, spec.size).unwrap();
     file
 }
 
