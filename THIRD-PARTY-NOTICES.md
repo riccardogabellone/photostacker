@@ -252,9 +252,10 @@ How each reaches the packages:
 | libde265 | the system's shared library, `libde265.so.0`: the Debian package depends on it, and the AppImage carries a copy | built in, from vcpkg | built in |
 
 On Linux and macOS the libheif built in is the one the `libheif-sys` version
-in `Cargo.lock` carries (its version is the part after the `+`). libheif is
-built with libde265 as its only codec, so no codec under the GPL, such as x265
-or x264, is in the packages.
+in `Cargo.lock` carries (its version is the part after the `+`). On Windows
+both libraries come from the vcpkg commit that `scripts/windows-heif.ps1`
+pins, which names their versions. libheif is built with libde265 as its only
+codec, so no codec under the GPL, such as x265 or x264, is in the packages.
 
 The LGPL lets you use changed copies of these libraries with Photostacker.
 Where a library is built in, the app is rebuilt with your copy in its place:

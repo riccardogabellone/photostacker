@@ -15,7 +15,7 @@ It is a desktop app and a command-line tool. It works offline, only reads your p
 Photostacker is at 0.1.0 and has no installers yet: for now it is built from source.
 
 - Developed and tested on Linux, natively and under WSL.
-- A script builds the app for Windows; that build has no HEIC support yet.
+- On Windows a script builds the app and the command-line tool, HEIC support included, and the tests pass there too.
 - Nothing has been built or run on macOS yet.
 - Photoshop itself has not opened the files yet. Three other readers have (GIMP, PhotoCraft and Photopea): see [docs/photoshop-checks.md](docs/photoshop-checks.md).
 
@@ -51,11 +51,13 @@ just run-cli run <folder of photos>        # the command line: group and write t
 
 ### Windows
 
-With the MSVC toolchain and the Windows SDK (Visual Studio's "Desktop development with C++"), in PowerShell 7:
+With the MSVC toolchain and the Windows SDK (Visual Studio's "Desktop development with C++") and git, in PowerShell 7:
 
 ```powershell
-pwsh scripts/win.ps1                       # builds dist/windows/Photostacker.exe, with ONNX Runtime beside it
+pwsh scripts/win.ps1    # builds dist/windows/Photostacker.exe and photostacker-cli.exe, with ONNX Runtime beside them
 ```
+
+The first run also builds the HEIC decoder (libheif and libde265) with vcpkg, which takes a few minutes and needs the network. `pwsh scripts/win.ps1 -Test` runs the tests.
 
 ### The visual check
 

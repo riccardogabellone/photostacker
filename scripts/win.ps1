@@ -1,36 +1,60 @@
 #Requires -Version 7
-# Builds the desktop app natively on Windows, so it can be tried by hand:
+# Builds the desktop app and the command-line tool natively on Windows, runs the tests there,
+# or saves a screen of the app:
 #
-#   pwsh scripts/win.ps1
+#   pwsh scripts/win.ps1                         # build both into <repo>\dist\windows
+#   pwsh scripts/win.ps1 -Test [nextest arguments]
+#   pwsh scripts/win.ps1 -Screenshot <out.png> <screen> [dark|light] [width] [height]
 #
-# It builds `Photostacker.exe` with the MSVC toolchain (stable-x86_64-pc-windows-msvc,
-# which must be installed, and no older than the workspace's `rust-version`:
-# `rustup update stable-x86_64-pc-windows-msvc` brings it up to date; the machine's
-# default toolchain is left alone), with Stage 3
-# (`ml`) and without HEIC, and puts it in `<repo>\dist\windows\` beside Microsoft's
-# ONNX Runtime (`onnxruntime.dll`, which the app looks for beside its executable,
-# spec §8.3), in the version that scripts\onnxruntime.tsv pins for Windows x64, and that
-# runtime's licence files.
+# Plain, it builds `Photostacker.exe` and `photostacker-cli.exe` in release mode with the MSVC
+# toolchain (stable-x86_64-pc-windows-msvc, which must be installed, and no older than the
+# workspace's `rust-version`: `rustup update stable-x86_64-pc-windows-msvc` brings it up to
+# date; the machine's default toolchain is left alone), with the default features, Stage 3
+# (`ml`) and HEIC among them, and puts them in `<repo>\dist\windows\` beside Microsoft's
+# ONNX Runtime (`onnxruntime.dll`, which both look for beside their executable, spec §8.3), in
+# the version that scripts\onnxruntime.tsv pins for Windows x64, and that runtime's licence
+# files.
+#
+# -Test runs `cargo nextest run --workspace --locked` with the arguments that follow it (as in
+# `pwsh scripts/win.ps1 -Test -E 'test(heic)'`), with ONNX Runtime's library in
+# ORT_DYLIB_PATH, so the tests that run a model run. It needs cargo-nextest:
+# `cargo +stable-x86_64-pc-windows-msvc install cargo-nextest --locked`. -Screenshot runs the
+# screenshot example (`just screenshot` elsewhere); a relative <out.png> is taken from the
+# repository's folder, as `just` takes it. Neither touches dist\windows.
+#
+# HEIC: with the MSVC toolchain, libheif-sys takes libheif and libde265 from vcpkg. The
+# script first runs scripts\windows-heif.ps1, which keeps a vcpkg checkout at a pinned commit
+# with the two libraries built (the first time it needs git and the network, and takes a few
+# minutes; then it takes a second), and passes its root to the build in VCPKG_ROOT.
 #
 # The MSVC toolchain links with the Visual Studio Build Tools' "Desktop development with
 # C++" workload: the MSVC compiler and linker, and the Windows SDK. Without the SDK, rustc
 # finds no linker at all and says "linker `link.exe` not found", even where link.exe is
-# installed.
+# installed. The SDK's resource compiler embeds the app's icon, which the build requires
+# (REQUIRE_WINDOWS_ICON=1).
 #
-# It only builds: the tests have been run on Linux only so far, through `just`
-# (AGENTS.md). The build goes into %LOCALAPPDATA%\photostacker\cargo-target
-# and ONNX Runtime into %LOCALAPPDATA%\photostacker\onnxruntime\<version> (where
-# scripts/ort.sh puts it too, so the two share one download), never into the
+# Every cargo command goes into %LOCALAPPDATA%\photostacker\cargo-target, ONNX Runtime into
+# %LOCALAPPDATA%\photostacker\onnxruntime\<version> (where scripts/ort.sh puts it too, so the
+# two share one download) and vcpkg into %LOCALAPPDATA%\photostacker\vcpkg, never into the
 # repository, which the script changes only under dist\; cargo also writes to its own home
 # (%USERPROFILE%\.cargo: the registry of the crates it downloads), outside the repository
-# too. Cargo.lock is used as it is (`--locked`). CARGO_TARGET_DIR is set for the build only:
-# the caller's value, or its absence, is put back. The CI Windows runner stays the
-# authoritative Windows build (spec §3).
+# too. Cargo.lock is used as it is (`--locked`). Cargo runs from the repository's folder, so
+# it reads .cargo\config.toml. The variables the script sets (CARGO_TARGET_DIR, VCPKG_ROOT,
+# ORT_DYLIB_PATH, REQUIRE_WINDOWS_ICON) are set for cargo only: the caller's values, or
+# their absence, are put back. The CI Windows runner stays the authoritative Windows build
+# (spec §3).
 #
-# Before anything else it checks what would otherwise fail late: that Photostacker is not
-# running from dist\windows (its locked executable would stop the copy half-way), that the
-# MSVC toolchain is installed (so rustup never installs one on its own), and that the
-# Windows SDK is there.
+# Before anything else it checks what would otherwise fail late: that neither executable is
+# running from dist\windows (a locked executable would stop the copy half-way), that the
+# MSVC toolchain is installed (so rustup never installs one on its own), that the Windows
+# SDK is there, and for -Test that cargo-nextest is.
+
+param(
+    # Run the tests instead of building; the arguments after it go to nextest.
+    [switch] $Test,
+    # Save a screen of the app instead of building; the arguments after it go to the example.
+    [switch] $Screenshot
+)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -68,20 +92,39 @@ $OrtDir = Join-Path $DataRoot "onnxruntime\$OrtVersion"
 $OrtHome = Join-Path $OrtDir $OrtFolder
 $OrtLibrary = Join-Path $OrtHome 'lib\onnxruntime.dll'
 $TargetDir = Join-Path $DataRoot 'cargo-target'
-$Exe = Join-Path $TargetDir 'release\Photostacker.exe'
+# The executables the build makes, by the name of their process.
+$Executables = [ordered]@{
+    'Photostacker'     = Join-Path $TargetDir 'release\Photostacker.exe'
+    'photostacker-cli' = Join-Path $TargetDir 'release\photostacker-cli.exe'
+}
 $Dist = Join-Path $Repo 'dist\windows'
 
 # What installs the Windows SDK, which the MSVC linker needs.
 $SdkRemedy = 'Install the Visual Studio Build Tools'' "Desktop development with C++" workload, which brings the Windows SDK, then run this script again.'
 
-# Stops when Photostacker runs from dist\windows: the build would replace its files, and
-# Windows keeps a running executable locked, so the copy would stop half-way.
+# Stops unless the arguments fit the switches: at most one switch, and arguments only after one.
+function Assert-Arguments([object[]] $arguments) {
+    if ($Test -and $Screenshot) {
+        throw 'Pass -Test or -Screenshot, not both.'
+    }
+    if (-not ($Test -or $Screenshot) -and $arguments.Count -gt 0) {
+        throw "Arguments go after -Test or -Screenshot; a build takes none (got: $arguments)."
+    }
+    if ($Screenshot -and $arguments.Count -lt 2) {
+        throw 'Usage: pwsh scripts/win.ps1 -Screenshot <out.png> <screen> [dark|light] [width] [height]'
+    }
+}
+
+# Stops when either executable runs from dist\windows: the build would replace its files,
+# and Windows keeps a running executable locked, so the copy would stop half-way.
 function Assert-NotRunning {
-    $exe = Join-Path $Dist 'Photostacker.exe'
-    $running = Get-Process -Name 'Photostacker' -ErrorAction SilentlyContinue |
-        Where-Object { $_.Path -and ($_.Path -ieq $exe) }
-    if ($running) {
-        throw 'Close Photostacker first: dist\windows\Photostacker.exe is running.'
+    foreach ($name in $Executables.Keys) {
+        $exe = Join-Path $Dist "$name.exe"
+        $running = Get-Process -Name $name -ErrorAction SilentlyContinue |
+            Where-Object { $_.Path -and ($_.Path -ieq $exe) }
+        if ($running) {
+            throw "Close $name first: dist\windows\$name.exe is running."
+        }
     }
 }
 
@@ -128,30 +171,10 @@ function Assert-WindowsSdk {
     }
 }
 
-# Builds the app into $TargetDir, from the repository whatever the current folder is.
-# CARGO_TARGET_DIR is the build's own: the caller's value, or its absence, is put back.
-function Build-App {
-    $callerTarget = $env:CARGO_TARGET_DIR
-    $env:CARGO_TARGET_DIR = $TargetDir
-    Push-Location -LiteralPath $Repo
-    try {
-        cargo "+$Toolchain" build --release --locked -p photostacker-ui --no-default-features --features ml | Out-Host
-        # A native command's failure does not throw, whatever $ErrorActionPreference says.
-        if ($LASTEXITCODE -ne 0) {
-            throw "cargo build failed with exit code $LASTEXITCODE"
-        }
-    }
-    finally {
-        Pop-Location
-        if ($null -eq $callerTarget) {
-            Remove-Item -LiteralPath 'Env:CARGO_TARGET_DIR' -ErrorAction SilentlyContinue
-        }
-        else {
-            $env:CARGO_TARGET_DIR = $callerTarget
-        }
-    }
-    if (-not (Test-Path -LiteralPath $Exe -PathType Leaf)) {
-        throw "the build reported success but $Exe is not there"
+# Stops unless cargo-nextest is installed, which runs the tests.
+function Assert-Nextest {
+    if (-not (Get-Command cargo-nextest -ErrorAction SilentlyContinue)) {
+        throw "cargo-nextest is not installed: run ``cargo +$Toolchain install cargo-nextest --locked``, then run this script again."
     }
 }
 
@@ -190,31 +213,101 @@ function Install-OnnxRuntime {
     Write-Host "ONNX Runtime $OrtVersion is at $OrtHome"
 }
 
-# Fills dist\windows with the executable, ONNX Runtime beside it and that runtime's
+# libheif and libde265 in vcpkg (scripts\windows-heif.ps1, which stops with its own sentence
+# when it cannot); returns vcpkg's root.
+function Install-Heif {
+    $root = & (Join-Path $PSScriptRoot 'windows-heif.ps1')
+    Write-Host "libheif and libde265 are in vcpkg at $root"
+    return $root
+}
+
+# Runs cargo with $arguments, from the repository whatever the current folder is, with the
+# script's variables set for it alone: the caller's values, or their absence, are put back.
+# Returns cargo's exit code.
+function Invoke-Cargo([string] $vcpkgRoot, [string[]] $arguments) {
+    $variables = [ordered]@{
+        CARGO_TARGET_DIR     = $TargetDir
+        VCPKG_ROOT           = $vcpkgRoot
+        ORT_DYLIB_PATH       = $OrtLibrary
+        REQUIRE_WINDOWS_ICON = '1'
+    }
+    $saved = @{}
+    foreach ($name in $variables.Keys) {
+        $saved[$name] = [System.Environment]::GetEnvironmentVariable($name)
+        [System.Environment]::SetEnvironmentVariable($name, $variables[$name])
+    }
+    Push-Location -LiteralPath $Repo
+    try {
+        cargo "+$Toolchain" @arguments | Out-Host
+        return $LASTEXITCODE
+    }
+    finally {
+        Pop-Location
+        foreach ($name in $saved.Keys) {
+            [System.Environment]::SetEnvironmentVariable($name, $saved[$name])
+        }
+    }
+}
+
+# Builds both executables into $TargetDir.
+function Build-App([string] $vcpkgRoot) {
+    $code = Invoke-Cargo $vcpkgRoot @('build', '--release', '--locked', '-p', 'photostacker-ui', '-p', 'photostacker-cli')
+    # A native command's failure does not throw, whatever $ErrorActionPreference says.
+    if ($code -ne 0) {
+        throw "cargo build failed with exit code $code"
+    }
+    foreach ($exe in $Executables.Values) {
+        if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
+            throw "the build reported success but $exe is not there"
+        }
+    }
+}
+
+# Fills dist\windows with the executables, ONNX Runtime beside them and that runtime's
 # licence files, under names that say whose they are, and nothing else.
 function Copy-ToDist {
     if (Test-Path -LiteralPath $Dist) {
         Remove-Item -LiteralPath $Dist -Recurse -Force
     }
     New-Item -ItemType Directory -Force -Path $Dist | Out-Null
-    Copy-Item -LiteralPath $Exe -Destination $Dist
+    foreach ($exe in $Executables.Values) {
+        Copy-Item -LiteralPath $exe -Destination $Dist
+    }
     Copy-Item -LiteralPath $OrtLibrary -Destination $Dist
     Copy-Item -LiteralPath (Join-Path $OrtHome 'LICENSE') -Destination (Join-Path $Dist 'onnxruntime-LICENSE.txt')
     Copy-Item -LiteralPath (Join-Path $OrtHome 'ThirdPartyNotices.txt') -Destination (Join-Path $Dist 'onnxruntime-ThirdPartyNotices.txt')
 }
 
-# The checks, then ONNX Runtime: a missing tool, a running app, a failed download or a
-# wrong digest stops the script in seconds, not after a build of many minutes.
-Assert-NotRunning
+# The checks, then ONNX Runtime and vcpkg: a wrong argument, a missing tool, a running app, a
+# failed download or a wrong digest stops the script in seconds, not after a build of many
+# minutes.
+Assert-Arguments $args
+if (-not ($Test -or $Screenshot)) {
+    Assert-NotRunning
+}
 Assert-Toolchain
 Assert-WindowsSdk
+if ($Test) {
+    Assert-Nextest
+}
 Install-OnnxRuntime
-Build-App
-# Again: it may have been started during the build.
+$vcpkgRoot = Install-Heif
+
+if ($Test) {
+    exit (Invoke-Cargo $vcpkgRoot (@('nextest', 'run', '--workspace', '--locked') + $args))
+}
+if ($Screenshot) {
+    exit (Invoke-Cargo $vcpkgRoot (@('run', '--release', '--locked', '-p', 'photostacker-ui', '--example', 'screenshot', '--') + $args))
+}
+
+Build-App $vcpkgRoot
+# Again: one may have been started during the build.
 Assert-NotRunning
 Copy-ToDist
 
-$built = Get-Item -LiteralPath (Join-Path $Dist 'Photostacker.exe')
 Write-Host ''
 Write-Host "Built into $Dist"
-Write-Host ('Photostacker.exe: {0:N1} MiB ({1:N0} bytes)' -f ($built.Length / 1MB), $built.Length)
+foreach ($name in $Executables.Keys) {
+    $built = Get-Item -LiteralPath (Join-Path $Dist "$name.exe")
+    Write-Host ('{0}.exe: {1:N1} MiB ({2:N0} bytes)' -f $name, ($built.Length / 1MB), $built.Length)
+}
