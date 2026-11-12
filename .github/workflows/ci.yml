@@ -151,11 +151,13 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       # --no-fail-fast: a run that fails names every test that fails on its system, not
-      # only the first.
+      # only the first. For the same reason the second run on Linux follows a first that
+      # failed (not one that never started).
       - name: Tests
+        id: tests
         run: cargo nextest run --workspace --locked --no-fail-fast
       - name: Tests without ml and heic (Linux)
-        if: runner.os == 'Linux'
+        if: ${{ !cancelled() && runner.os == 'Linux' && steps.tests.conclusion != 'skipped' }}
         run: cargo nextest run --workspace --locked --no-fail-fast --no-default-features
       # The tests run in the test profile; this builds the executables users get.
       - name: Release build
