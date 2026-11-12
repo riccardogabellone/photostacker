@@ -4251,9 +4251,13 @@ fn run_until_done(harness: &mut Harness<'static, App>, input: &Path, job: JobId)
     });
 }
 
-/// The files directly in `folder`, in order.
+/// The files directly in `folder`, in order, under its canonical path, as the engine
+/// records the stacks it writes: on Windows a canonical path has the verbatim prefix
+/// `\\?\`, and on macOS the temporary folder is reached through a link.
 fn paths_in(folder: &Path) -> Vec<PathBuf> {
-    files_in(folder).into_keys().collect()
+    files_in(&folder.canonicalize().unwrap())
+        .into_keys()
+        .collect()
 }
 
 #[test]
