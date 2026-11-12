@@ -81,7 +81,8 @@ function Assert-OutsideRepository {
 # junction or a link: the one unmarked state a run of this script leaves besides an empty
 # root, when it stopped after making `.git` for the mark and before writing the mark into
 # it. The script writes the mark before anything else in the root, so nothing else
-# unmarked can be its own. No git command decides it: a `.git` that git cannot read is someone else's too.
+# unmarked can be its own. No git command decides it: a `.git` that git cannot read is
+# someone else's too.
 function Test-InterruptedStart {
     $entries = @(Get-ChildItem -LiteralPath $Root -Force)
     if ($entries.Count -ne 1) {
