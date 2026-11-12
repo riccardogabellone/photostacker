@@ -77,6 +77,11 @@ jobs:
           toolchain: stable
           components: clippy
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          # cargo does not build libheif again when only its toolchain file changes.
+          key: libheif-${{ hashFiles('packaging/cmake/libheif.cmake') }}
+          # A failed job keeps the tools and dependencies it built for the next run.
+          cache-on-failure: true
       # A prebuilt nextest, for every runner here.
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
