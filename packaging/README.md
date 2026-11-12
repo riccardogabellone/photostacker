@@ -51,7 +51,7 @@ just package dmg             # macOS
 scripts/package.sh nsis,wix  # Windows, in Git Bash
 ```
 
-On Windows, run `pwsh scripts/windows-heif.ps1` first, and set `VCPKG_ROOT` to the folder it prints on its last line: libheif comes from there. The Visual C++ runtime is copied from the redistributable folder of the newest Visual Studio installation that `vswhere.exe` finds: the highest version there that has all four files.
+On macOS, build libde265 with `scripts/libde265.sh <prefix>` first, and set `CMAKE_PREFIX_PATH` and `PKG_CONFIG_LIBDIR` as [AGENTS.md](../AGENTS.md#environment) says. On Windows, run `pwsh scripts/windows-heif.ps1` first, and set `VCPKG_ROOT` to the folder it prints on its last line: libheif comes from there. The Visual C++ runtime is copied from the redistributable folder of the newest Visual Studio installation that `vswhere.exe` finds: the highest version there that has all four files.
 
 The script:
 
@@ -83,13 +83,9 @@ Each check prints one line; the first that fails says what it expected and what 
 
 ## Releasing
 
-The release workflow is [.github/workflows/release.yml](../.github/workflows/release.yml); a pull request that touches the packaging runs it too, without a release. A release:
+The release workflow is [.github/workflows/release.yml](../.github/workflows/release.yml) (spec §11.3). It runs on a pushed tag `v*`, on a pull request that changes the packaging, and when started by hand. Each run builds the packages of every system on that system, with `scripts/package.sh`, and checks each with `scripts/smoke.sh --install` (a runner is a throwaway machine). Only a tag also gets a release: the workflow first checks that the tag is `v` and the workspace's version, and at the end creates a draft GitHub release with the packages, `checksums.txt` (their SHA-256) and build-provenance attestations, to be published by hand.
 
-1. Bump `version` in `[workspace.package]` of the root `Cargo.toml` in a pull request, and merge it.
-2. Tag the merge commit on `main` as `vX.Y.Z`, the new version, and push the tag.
-3. The workflow builds every package on its system, checks each with `scripts/smoke.sh`, and drafts a GitHub release with them, their SHA-256 checksums and build-provenance attestations.
-4. Download the packages from the draft and try them on each system.
-5. Publish the draft.
+The steps of a release are in [AGENTS.md](../AGENTS.md#commits-tags-and-releases).
 
 ## Desktop identity
 
@@ -103,12 +99,7 @@ The AppImage tooling looks for the desktop entry under the main binary's name, s
 
 ## Not signed
 
-The packages are not code-signed yet, so the first start asks for a step:
-
-- **macOS** says the app is damaged or from an unidentified developer. Run `xattr -dr com.apple.quarantine /Applications/Photostacker.app`, or open it once and then allow it in System Settings, Privacy & Security, "Open Anyway".
-- **Windows** SmartScreen warns about an unrecognised app: choose "More info", then "Run anyway".
-
-Signing needs an Apple Developer ID (with notarisation) and a Windows code-signing certificate; cargo-packager has `macos.signing-identity` and `windows.sign-command` for them.
+The packages are not code-signed, so on macOS and Windows the first start asks for one more step: the README's [Installing](../README.md#installing) gives it for each system. Signing needs an Apple Developer ID (with notarisation) and a Windows code-signing certificate; cargo-packager has `macos.signing-identity` and `windows.sign-command` for them.
 
 ## The AppImage and FUSE
 
