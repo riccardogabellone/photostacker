@@ -43,7 +43,7 @@ cargo install cargo-packager --version 0.11.8 --locked
 cargo install cargo-about --version 0.9.3 --locked --features cli
 ```
 
-and the network: it downloads ONNX Runtime's archive (once, into the cache folder of `scripts/ort.sh`), the licence files cargo-about fetches, and on first use cargo-packager's own tools (linuxdeploy and its AppImage plugin, NSIS, WiX, create-dmg).
+and the network: it downloads ONNX Runtime's archive (once, into the cache folder of `scripts/ort.sh`), the licence files cargo-about fetches, and on first use cargo-packager's own tools (linuxdeploy and its AppImage plugin, NSIS, WiX, create-dmg). cargo-packager checks the WiX tools against a SHA-256 and NSIS and one of its plugins against a SHA-1 that it carries, but not NSIS's ApplicationID plugin. linuxdeploy, AppRun and linuxdeploy's AppImage plugin (from a rolling `continuous` release) come with no digest, and create-dmg comes from the address of a fixed commit, with no digest either.
 
 ```sh
 just package deb,appimage    # Linux
