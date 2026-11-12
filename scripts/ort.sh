@@ -19,7 +19,10 @@
 # The archive is downloaded into a temporary folder beside the build's, its SHA-256 checked,
 # unpacked there, and only then is the build's folder renamed into place whole: an
 # interrupted run or a wrong download leaves nothing that looks installed, and the next run
-# starts again.
+# starts again. Two runs at once each download a copy; one that finds, at the end, that the
+# other has installed the build keeps that install and drops its own copy.
+#
+# A .zip (the Windows build) is unpacked with unzip, which Git for Windows has.
 #
 # macOS has bash 3.2: no associative arrays, no mapfile, no ${var,,}.
 set -euo pipefail
@@ -39,7 +42,9 @@ case "$#:${1:-}" in
         ;;
 esac
 
-table="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/onnxruntime.tsv"
+# CDPATH is cleared: with it exported, cd prints the folder it changes to, which would end
+# up in the path.
+table="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/onnxruntime.tsv"
 
 # The table's names for this system.
 case "$(uname -s)" in
@@ -105,6 +110,16 @@ if [ "$where" = 1 ] || [ -s "$library_file" ]; then
     exit 0
 fi
 
+case "$archive" in
+    *.tgz) ;;
+    *.zip)
+        if ! command -v unzip >/dev/null 2>&1; then
+            fail "unzip is not on the PATH, and it is needed to unpack $archive: install it, then run this script again"
+        fi
+        ;;
+    *) fail "$archive is neither a .tgz nor a .zip" ;;
+esac
+
 url="https://github.com/microsoft/onnxruntime/releases/download/v$version/$archive"
 mkdir -p "$dir"
 tmp=$(mktemp -d "$dir/.extract.XXXXXX")
@@ -128,20 +143,27 @@ fi
 
 case "$archive" in
     *.tgz) tar -xzf "$tmp/$archive" -C "$tmp" ;;
-    *.zip)
-        if command -v unzip >/dev/null 2>&1; then
-            unzip -q "$tmp/$archive" -d "$tmp"
-        else
-            tar -xf "$tmp/$archive" -C "$tmp"
-        fi
-        ;;
-    *) fail "$archive is neither a .tgz nor a .zip" ;;
+    *.zip) unzip -q "$tmp/$archive" -d "$tmp" ;;
 esac
 if [ ! -s "$tmp/$stem/$library" ]; then
     fail "$archive holds no $stem/$library; nothing was installed"
 fi
+# Another run may have installed the build while this one downloaded it, and may already
+# have printed its path: that install is kept, not replaced.
+if [ -s "$library_file" ]; then
+    echo "ONNX Runtime $version was installed in $home by another run meanwhile; that install is kept" >&2
+    print_path
+    exit 0
+fi
 # A folder without the library is no install, and mv would move into it, not replace it.
 rm -rf "$home"
 mv "$tmp/$stem" "$home"
-echo "Installed ONNX Runtime $version in $home" >&2
+# Two runs that pass the check above together both get here, and the second mv moves its
+# copy into the first's install: that copy goes, and the first's install stays.
+if [ -e "$home/$stem" ]; then
+    rm -rf "${home:?}/$stem"
+    echo "ONNX Runtime $version was installed in $home by another run meanwhile; that install is kept" >&2
+else
+    echo "Installed ONNX Runtime $version in $home" >&2
+fi
 print_path

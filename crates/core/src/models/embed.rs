@@ -534,6 +534,13 @@ mod tests {
         let table = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/onnxruntime.tsv");
         let text = fs::read_to_string(&table)
             .unwrap_or_else(|error| panic!("{}: {error}", table.display()));
+        // The scripts split each line on tabs alone: a carriage return would end up in the
+        // last column, the library's path.
+        assert!(
+            !text.contains('\r'),
+            "{} holds a carriage return: save it with LF line endings",
+            table.display()
+        );
         let rows: Vec<Vec<&str>> = text
             .lines()
             .filter(|line| !line.trim().is_empty() && !line.starts_with('#'))
@@ -554,7 +561,13 @@ mod tests {
                 "not 64 lowercase hex digits: {sha256}"
             );
             assert!(archive.contains(version), "{archive} is not {version}");
-            let numbers: Vec<u32> = version.split('.').map(|n| n.parse().unwrap()).collect();
+            let numbers: Vec<u32> = version
+                .split('.')
+                .map(|n| {
+                    n.parse()
+                        .unwrap_or_else(|error| panic!("version {version:?}: {n:?}: {error}"))
+                })
+                .collect();
             assert!(
                 numbers.len() == 3 && (numbers[0], numbers[1]) >= (1, 17),
                 "{version} is older than 1.17"
