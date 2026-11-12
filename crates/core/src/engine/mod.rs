@@ -88,6 +88,7 @@ pub use query::{FileView, GroupView, JobView, ReviewView};
 pub use review::MoveTarget;
 pub use stage3::EmbedSource;
 
+use crate::fsio::display_path;
 use crate::lock::{FileLock, try_lock};
 use crate::model::{ConfigError, GroupStatus, JobConfig, JobStatus, Warning};
 pub use crate::store::{GroupId, JobCounts, JobId};
@@ -133,7 +134,7 @@ pub enum EngineError {
     #[error(transparent)]
     Config(#[from] ConfigError),
     /// A job's config goes into the store as JSON, which holds only UTF-8.
-    #[error("a job's folder must be valid UTF-8: {}", .0.display())]
+    #[error("a job's folder must be valid UTF-8: {}", display_path(.0))]
     NotUtf8(PathBuf),
     #[error("no job {0}")]
     UnknownJob(JobId),
@@ -156,10 +157,10 @@ pub enum EngineError {
     Spawn(io::Error),
     /// Another engine, of this process or another, holds the database's
     /// lock (spec §7.2).
-    #[error("another Photostacker is using {}", .0.display())]
+    #[error("another Photostacker is using {}", display_path(.0))]
     Busy(PathBuf),
     /// The database's lock file cannot be opened or locked.
-    #[error("cannot lock the database {}: {error}", .db.display())]
+    #[error("cannot lock the database {}: {error}", display_path(.db))]
     Lock { db: PathBuf, error: io::Error },
     /// The worker thread has stopped ([`EngineEvent::EngineStopped`]), so
     /// nothing queued would run.
@@ -593,8 +594,8 @@ pub fn is_stranded(status: GroupStatus, warnings: &[(usize, Warning)]) -> bool {
 fn remove_partial(output_dir: &Path, partial: &Path) -> bool {
     if !is_a_writes_partial(output_dir, partial) {
         tracing::warn!(
-            partial = %partial.display(),
-            output = %output_dir.display(),
+            partial = %display_path(partial),
+            output = %display_path(output_dir),
             "a recorded partial that no write makes is left alone"
         );
         return true;
@@ -614,7 +615,7 @@ fn remove_partial(output_dir: &Path, partial: &Path) -> bool {
             Ok(()) => {}
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => {
-                tracing::warn!(path = %path.display(), %error, "cannot remove an unfinished stack");
+                tracing::warn!(path = %display_path(&path), %error, "cannot remove an unfinished stack");
                 gone = false;
             }
         }
@@ -668,7 +669,7 @@ fn remove_dir(dir: &Path) {
         Ok(()) => {}
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => {
-            tracing::warn!(dir = %dir.display(), %error, "cannot remove a job's thumbnails");
+            tracing::warn!(dir = %display_path(dir), %error, "cannot remove a job's thumbnails");
         }
     }
 }

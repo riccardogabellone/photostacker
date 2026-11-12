@@ -357,7 +357,7 @@ fn canonical_or_as_is(path: &Path) -> PathBuf {
 /// Why a scan could not run: the input folder itself could not be read.
 #[derive(Debug, thiserror::Error)]
 pub enum DiscoverError {
-    #[error("cannot read {}", path.display())]
+    #[error("cannot read {}", crate::fsio::display_path(path))]
     Io { path: PathBuf, source: io::Error },
 }
 

@@ -55,7 +55,7 @@ pub enum ModelError {
     /// registry's file of the model.
     #[error(
         "{} does not match {id}: its SHA-256 is {actual}, the registry's is {expected}",
-        path.display()
+        crate::fsio::display_path(path)
     )]
     HashMismatch {
         path: PathBuf,

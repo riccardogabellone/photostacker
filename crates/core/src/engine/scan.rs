@@ -14,6 +14,7 @@ use crate::analyze::{
     AnalyzeError, AnalyzeHooks, EXAM_FORMAT, ExamCache, ExamRole, FileExam, Progress, analyze_with,
 };
 use crate::discover::DiscoveredFile;
+use crate::fsio::display_path;
 use crate::model::{GroupStatus, JobStatus};
 use crate::store::{ExamKey, paths};
 use crate::thumbs;
@@ -150,7 +151,7 @@ impl<'a> StoreCache<'a> {
         match thumbs::write_thumbnail(&self.thumbs, &thumbnail_key(&file.path), thumb) {
             Ok(path) => Some(path),
             Err(error) => {
-                tracing::warn!(path = %file.path.display(), %error, "cannot write a review thumbnail");
+                tracing::warn!(path = %display_path(&file.path), %error, "cannot write a review thumbnail");
                 None
             }
         }
@@ -166,7 +167,7 @@ impl ExamCache for StoreCache<'_> {
         let stored = match stored {
             Ok(stored) => stored?,
             Err(error) => {
-                tracing::warn!(path = %file.path.display(), %error, "cannot read a cached exam");
+                tracing::warn!(path = %display_path(&file.path), %error, "cannot read a cached exam");
                 return None;
             }
         };
@@ -197,7 +198,7 @@ impl ExamCache for StoreCache<'_> {
         let stored =
             lock(&self.shared.writer).put_exam(&self.key(role, file), exam, thumb_path.as_deref());
         if let Err(error) = stored {
-            tracing::warn!(path = %file.path.display(), %error, "cannot cache an exam");
+            tracing::warn!(path = %display_path(&file.path), %error, "cannot cache an exam");
         }
     }
 

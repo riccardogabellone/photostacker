@@ -125,7 +125,7 @@ impl Store {
             conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get(0))?;
         if !mode.eq_ignore_ascii_case("wal") {
             // Readers then wait for the writer instead of reading beside it.
-            tracing::warn!(db = %path.display(), mode, "the database cannot use WAL");
+            tracing::warn!(db = %crate::fsio::display_path(path), mode, "the database cannot use WAL");
         }
         Self::migrated(conn)
     }

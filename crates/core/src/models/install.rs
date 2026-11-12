@@ -164,7 +164,7 @@ impl Drop for RemoveOnDrop<'_> {
             Ok(()) => {}
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => {
-                tracing::warn!(path = %self.0.display(), %error, "cannot remove an import's copy");
+                tracing::warn!(path = %crate::fsio::display_path(self.0), %error, "cannot remove an import's copy");
             }
         }
     }

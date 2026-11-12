@@ -12,6 +12,8 @@ use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io;
 use std::path::Path;
 
+use crate::fsio::display_path;
+
 /// A held lock; dropping it releases the lock.
 #[derive(Debug)]
 pub(crate) struct FileLock {
@@ -40,7 +42,7 @@ pub(crate) fn try_lock(file: &Path) -> io::Result<Option<FileLock>> {
         Err(TryLockError::WouldBlock) => Ok(None),
         Err(TryLockError::Error(error)) if error.kind() == io::ErrorKind::Unsupported => {
             tracing::warn!(
-                file = %file.display(),
+                file = %display_path(file),
                 %error,
                 "the file system cannot lock this file; going on without the lock"
             );

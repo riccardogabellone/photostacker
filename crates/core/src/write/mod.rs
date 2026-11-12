@@ -61,7 +61,7 @@ use crate::analyze::{Analysis, FileRecord, Progress, Stage, Ticker};
 use crate::decode::{self, ColourHint, DecodeError, FullImage, Probe, Samples};
 use crate::exif::ExifData;
 use crate::fsio::{
-    OutputDirError, PartialFile, PersistError, SyncDir, ensure_output_dir, sync_dir,
+    OutputDirError, PartialFile, PersistError, SyncDir, display_path, ensure_output_dir, sync_dir,
     sync_dir_or_warn,
 };
 use crate::group::{CanvasProfile, Container, profile};
@@ -113,7 +113,7 @@ pub enum WriteError {
     Io(#[from] io::Error),
     /// The group's output subfolder, `rel` relative to the output folder,
     /// resolves outside the output folder (see [`write_groups`]).
-    #[error("the output subfolder {} leaves the output folder", rel.display())]
+    #[error("the output subfolder {} leaves the output folder", display_path(rel))]
     SubfolderOutside { rel: PathBuf },
     #[error("writing was cancelled")]
     Cancelled,
@@ -334,7 +334,7 @@ fn write_stack_with(
         canvas.container,
     )?;
     tracing::info!(
-        path = %path.display(),
+        path = %display_path(&path),
         layers = written.len(),
         container = ?canvas.container,
         "stack written"
@@ -439,7 +439,7 @@ pub fn write_groups(
 ) -> Result<WriteReport, WriteError> {
     let output = ensure_output_dir(config)?;
     tracing::info!(
-        output = %output.display(),
+        output = %display_path(&output),
         stacks = groups.len(),
         "write: writing the stacks"
     );
@@ -492,7 +492,7 @@ fn log_unwritten(files: &[FileRecord], members: &[usize], outcome: &Result<Write
     let first = || {
         members
             .first()
-            .map(|&id| files[id].path.display().to_string())
+            .map(|&id| display_path(&files[id].path))
             .unwrap_or_default()
     };
     match outcome {
@@ -587,8 +587,8 @@ fn output_subfolder(output: &Path, input_dir: &Path, first: &Path) -> Result<Pat
                 io::ErrorKind::InvalidInput,
                 format!(
                     "{} is not in the input folder {}",
-                    first.display(),
-                    input_dir.display()
+                    display_path(first),
+                    display_path(input_dir)
                 ),
             )
         })?;
@@ -604,7 +604,7 @@ fn output_subfolder(output: &Path, input_dir: &Path, first: &Path) -> Result<Pat
         let failed = |what: &str, e: io::Error| {
             io::Error::new(
                 e.kind(),
-                format!("the output subfolder {} {what}: {e}", next.display()),
+                format!("the output subfolder {} {what}: {e}", display_path(&next)),
             )
         };
         match fs::create_dir(&next) {

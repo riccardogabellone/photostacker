@@ -44,6 +44,7 @@ use super::worker::{Settle, TaskError};
 use super::{EngineEvent, JobId, Shared, error_chain, lock};
 use crate::analyze::{AnalyzeError, FileRecord, Progress, Stage, ThumbnailDecoder};
 use crate::discover::DiscoveredFile;
+use crate::fsio::display_path;
 use crate::guard;
 use crate::model::{JobConfig, JobStatus};
 use crate::models::{self, ModelSpec};
@@ -332,7 +333,9 @@ fn decode(
     ids.iter()
         .zip(decoded)
         .map(|(&id, thumb)| {
-            thumb.map_err(|error| Failure::Model(format!("{}: {error}", files[id].path.display())))
+            thumb.map_err(|error| {
+                Failure::Model(format!("{}: {error}", display_path(&files[id].path)))
+            })
         })
         .collect()
 }
@@ -466,7 +469,7 @@ mod installed {
                 .entry(model.id)
                 .or_insert_with(|| {
                     let file = model_file(&self.models_dir, model);
-                    tracing::info!(model = model.id, file = %file.display(), "loading a model");
+                    tracing::info!(model = model.id, file = %crate::fsio::display_path(&file), "loading a model");
                     // A panic while loading is kept as a failed load too.
                     guard::catch(|| Embedder::load(model, &file))
                         .map_err(|panic| format!("internal error while loading: {panic}"))

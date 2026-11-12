@@ -15,6 +15,7 @@ use image::{
 };
 
 use crate::budget::DECODE_MEMORY_BUDGET;
+use crate::fsio::display_path;
 use crate::model::FileKind;
 use crate::{guard, imageops};
 
@@ -264,7 +265,7 @@ fn guarded<T>(
 ) -> Result<T, DecodeError> {
     guard::catch(work).unwrap_or_else(|panic| {
         let error = format!("{context}: {panic}");
-        tracing::warn!(path = %path.display(), %error, "caught a panic while decoding");
+        tracing::warn!(path = %display_path(path), %error, "caught a panic while decoding");
         Err(DecodeError::Corrupt(error))
     })
 }

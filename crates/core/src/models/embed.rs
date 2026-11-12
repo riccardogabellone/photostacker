@@ -195,7 +195,7 @@ fn create_environment(library: &Path) -> Result<Environment, String> {
         Ok(result) => result,
         Err(panic) => Err(format!(
             "ONNX Runtime at {} failed to load: {panic}",
-            library.display()
+            crate::fsio::display_path(library)
         )),
     }
 }

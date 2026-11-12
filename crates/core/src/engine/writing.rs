@@ -11,7 +11,7 @@ use super::{
     Engine, EngineError, EngineEvent, GroupId, JobId, Shared, error_chain, lock, remove_partial,
 };
 use crate::analyze::{FileRecord, Progress, Stage, Ticker};
-use crate::fsio::ensure_output_dir;
+use crate::fsio::{display_path, ensure_output_dir};
 use crate::model::{GroupStatus, JobStatus, Warning};
 use crate::store::StoreError;
 use crate::write::{WriteError, WriteObserver, WriteOptions, WriteOutcome, write_groups};
@@ -150,7 +150,7 @@ fn remove_leftovers(
 ) -> Result<(), TaskError> {
     let mut kept: Vec<&Path> = Vec::new();
     for (group, partial) in leftovers {
-        tracing::info!(job, partial = %partial.display(), "removing an unfinished stack");
+        tracing::info!(job, partial = %display_path(partial), "removing an unfinished stack");
         if remove_partial(output_dir, partial) {
             lock(&shared.writer).set_group_partial(*group, None)?;
         } else {
@@ -161,11 +161,11 @@ fn remove_leftovers(
         [] => Ok(()),
         [only] => Err(TaskError::Failed(format!(
             "cannot remove the unfinished stack {}",
-            only.display()
+            display_path(only)
         ))),
         [first, ref more @ ..] => Err(TaskError::Failed(format!(
             "cannot remove the unfinished stack {} and {} more",
-            first.display(),
+            display_path(first),
             more.len()
         ))),
     }

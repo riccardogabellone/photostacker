@@ -33,7 +33,7 @@ fn write_replace_with(path: &Path, bytes: &[u8], sync: SyncDir) -> io::Result<()
     if file_name(path).is_none() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("{} does not name a file", path.display()),
+            format!("{} does not name a file", display_path(path)),
         ));
     }
     // `path` ends with its file name, so this is that name's partial.
@@ -72,7 +72,7 @@ pub(crate) type SyncDir = fn(&Path) -> io::Result<()>;
 pub(crate) fn sync_dir_or_warn(dir: &Path, sync: SyncDir) {
     if let Err(error) = sync(dir) {
         tracing::warn!(
-            folder = %dir.display(),
+            folder = %display_path(dir),
             %error,
             "cannot sync the folder; the file just named in it may not survive a crash"
         );
@@ -144,7 +144,7 @@ pub(crate) fn create_new(path: &Path) -> io::Result<File> {
         {
             Err(io::Error::new(
                 io::ErrorKind::AlreadyExists,
-                format!("{} already exists", path.display()),
+                format!("{} already exists", display_path(path)),
             ))
         }
         created => created,
@@ -288,7 +288,7 @@ fn rename_no_clobber(from: &Path, to: &Path) -> io::Result<()> {
         Err(e) => Err(e),
         Ok(_) => Err(io::Error::new(
             io::ErrorKind::AlreadyExists,
-            format!("{} already exists", to.display()),
+            format!("{} already exists", display_path(to)),
         )),
     }
 }
@@ -309,7 +309,7 @@ impl Drop for PartialFile {
 /// A failed [`PartialFile::persist_no_clobber`]: the cause, and the partial,
 /// still on disk, so the caller can retry under another name.
 #[derive(Debug, thiserror::Error)]
-#[error("cannot persist {}", file.path.display())]
+#[error("cannot persist {}", display_path(&file.path))]
 pub struct PersistError {
     #[source]
     pub error: io::Error,
@@ -351,7 +351,7 @@ pub fn without_verbatim_prefix(text: &str) -> Cow<'_, str> {
 
 /// Why the output folder cannot receive the stacks.
 #[derive(Debug, thiserror::Error)]
-#[error("output folder {}: {reason}", path.display())]
+#[error("output folder {}: {reason}", display_path(path))]
 pub struct OutputDirError {
     pub path: PathBuf,
     pub reason: String,
@@ -384,7 +384,7 @@ pub fn ensure_output_dir(config: &JobConfig) -> Result<PathBuf, OutputDirError> 
     let input = config.input_dir.canonicalize().map_err(|e| {
         fail(format!(
             "the input folder {} cannot be resolved: {e}",
-            config.input_dir.display()
+            display_path(&config.input_dir)
         ))
     })?;
     if canonical == input {

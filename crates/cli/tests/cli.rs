@@ -646,9 +646,51 @@ fn the_paths_the_cli_prints_are_plain() {
         let file = display_path(&verbatim.join(name));
         assert!(line.starts_with(&format!("warning: {file}: ")), "{line:?}");
     }
-    for line in stdout.lines().chain(named) {
-        assert!(!line.contains(r"\\?\"), "{line:?}");
-    }
+    assert!(!stdout.contains(r"\\?\"), "{stdout}");
+    assert!(!stderr.contains(r"\\?\"), "{stderr}");
+    assert_eq!(
+        stdout_paths(&assert),
+        [printed(&output).join("IMG_0001_3.psd")]
+    );
+}
+
+/// A stack that fails says why with the path it could not use, as the user
+/// knows it: on Windows the core works under the output folder's canonical
+/// path, whose verbatim `\\?\` prefix appears nowhere in what the CLI prints.
+/// Here a file `a` in the output folder stands where the stacks of `a/deep`
+/// need a folder; the stack at the top is written all the same.
+#[test]
+fn a_failed_stack_names_its_path_plainly() {
+    let root = tempfile::tempdir().unwrap();
+    let input = root.path().join("photos");
+    write_bracket(&input, BRACKET);
+    write_bracket_of(&input.join("a").join("deep"), SECOND_BRACKET, 2, 5);
+    let output = root.path().join("out");
+    fs::create_dir(&output).unwrap();
+    fs::write(output.join("a"), b"a file, not a folder").unwrap();
+
+    let assert = photostacker()
+        .arg("run")
+        .arg(&input)
+        .arg("-o")
+        .arg(&output)
+        .arg("--recursive")
+        .assert()
+        .code(1);
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
+    let deep = printed(&output).join("a").join("deep");
+    let failed = stderr
+        .lines()
+        .find(|line| line.starts_with("stack of ") && line.contains(" failed: "))
+        .unwrap_or_else(|| panic!("no failed stack in {stderr}"));
+    assert!(
+        failed.contains(&format!("the output subfolder {} ", deep.display())),
+        "{failed:?}"
+    );
+    assert!(!stdout.contains(r"\\?\"), "{stdout}");
+    assert!(!stderr.contains(r"\\?\"), "{stderr}");
     assert_eq!(
         stdout_paths(&assert),
         [printed(&output).join("IMG_0001_3.psd")]
