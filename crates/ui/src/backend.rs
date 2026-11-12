@@ -115,9 +115,10 @@ pub enum Reply {
         job: JobId,
         files: Vec<FileView>,
     },
+    /// Boxed: a review is far larger than any other reply.
     Review {
         job: JobId,
-        review: ReviewView,
+        review: Box<ReviewView>,
     },
     Models(Vec<ModelView>),
     /// The answer to the [`Request::Submit`] of `token`: the new job, or why there is none.
@@ -331,7 +332,7 @@ fn run(engine: &Engine, request: Request) -> Option<Reply> {
         }
         Request::Review(job) => review_read(job, engine.review(job), |review| Reply::Review {
             job,
-            review,
+            review: Box::new(review),
         }),
         Request::Models => Some(Reply::Models(engine.models())),
         Request::Submit { token, config } => Some(Reply::Submitted {
