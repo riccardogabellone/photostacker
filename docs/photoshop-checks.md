@@ -3,7 +3,7 @@
 What other programs make of the files the writers produce (spec §12.5). There are two kinds of check:
 
 - **The stand-ins:** GIMP, PhotoCraft and Photopea, three readers written independently of ours. A script opens every sample in each of them and compares what they read (see "The stand-ins"). They are run after every change to a writer.
-- **Photoshop itself,** by hand, on Windows: once before the first public release (Adobe's trial, or someone who has Photoshop), then before each release. Only Photoshop can say whether Photoshop warns. The stand-ins say whether readers built from the specification, and from Photoshop's own files, agree with ours.
+- **Photoshop itself,** by hand, on Windows (Adobe's trial, or someone who has Photoshop): before each release. It has not opened the set yet: 0.1.0, the first release, went out before it could, and its notes say so. Only Photoshop can say whether Photoshop warns. The stand-ins say whether readers built from the specification, and from Photoshop's own files, agree with ours.
 
 There is one table per checkpoint and one row per file:
 
@@ -147,7 +147,7 @@ Then check these items, which were written from the specification without a Phot
 The development machine has no Photoshop, so the checkpoint is in two parts:
 
 - **the stand-ins**, below, which are run again after every change to a writer;
-- **Photoshop itself**, still to be run on this set, with "What to look at", before the first public release. Until then `Compression16::default()` (ZIP) is provisional, and so is the absence of tag 34377 from the layered TIFFs.
+- **Photoshop itself**, still to be run on this set, with "What to look at": 0.1.0 was released before it could be. Until then `Compression16::default()` (ZIP) is provisional, and so is the absence of tag 34377 from the layered TIFFs.
 
 Regenerate the set with `just ps-samples --bigtiff` before checking, if the write or decode code has changed since. Every layered TIFF carries the Software tag `Photostacker <version>`, which discovery uses to skip Photostacker's own TIFFs.
 
