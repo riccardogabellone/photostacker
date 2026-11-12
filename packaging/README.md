@@ -40,7 +40,7 @@ The packages of a system are built on that system. Besides what [AGENTS.md](../A
 
 ```sh
 cargo install cargo-packager --version 0.11.8 --locked
-cargo install cargo-about --locked --features cli
+cargo install cargo-about --version 0.9.3 --locked --features cli
 ```
 
 and the network: it downloads ONNX Runtime's archive (once, into the cache folder of `scripts/ort.sh`), the licence files cargo-about fetches, and on first use cargo-packager's own tools (linuxdeploy and its AppImage plugin, NSIS, WiX, create-dmg).
@@ -83,7 +83,7 @@ Each check prints one line; the first that fails says what it expected and what 
 
 ## Releasing
 
-The release workflow is [.github/workflows/release.yml](../.github/workflows/release.yml) (spec §11.3). It runs on a pushed tag `v*`, on a pull request that changes the packaging, and when started by hand. Each run builds the packages of every system on that system, with `scripts/package.sh`, and checks each with `scripts/smoke.sh --install` (a runner is a throwaway machine). Only a tag also gets a release: the workflow first checks that the tag is `v` and the workspace's version, and at the end creates a draft GitHub release with the packages, `checksums.txt` (their SHA-256) and build-provenance attestations, to be published by hand.
+The release workflow is [.github/workflows/release.yml](../.github/workflows/release.yml) (spec §11.3). It runs on a pushed tag `v*`, on a pull request that changes the packaging, and when started by hand. Each run builds the packages of every system on that system, with `scripts/package.sh`, and checks each with `scripts/smoke.sh --install` (a runner is a throwaway machine). Only a tag also gets a release: the workflow first checks that the tag is `v` and the workspace's version, and at the end attests the build provenance of every file and creates a draft GitHub release with the packages and `checksums.txt` (their SHA-256), to be published by hand. The attestations are kept in GitHub's attestation store, not in the release; `gh attestation verify <file> --repo riccardogabellone/photostacker` checks a downloaded file against them.
 
 The steps of a release are in [AGENTS.md](../AGENTS.md#commits-tags-and-releases).
 

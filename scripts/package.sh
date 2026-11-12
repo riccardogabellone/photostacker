@@ -18,9 +18,10 @@
 # dist/package and dist/packages are emptied first, so a package never carries a stale file
 # and dist/packages holds only what this run made. scripts/smoke.sh checks the packages.
 #
-# Needs cargo, cargo-packager 0.11.8 and cargo-about (each `cargo install <tool> --locked`;
-# cargo-about with `--features cli`), curl, and the network (ONNX Runtime's archive, the
-# licence files cargo-about fetches, cargo-packager's own tools). Cargo builds into
+# Needs cargo, cargo-packager 0.11.8 and cargo-about 0.9.3 (each `cargo install <tool>
+# --version <version> --locked`; cargo-about with `--features cli`), curl, and the network
+# (ONNX Runtime's archive, the licence files cargo-about fetches, cargo-packager's own
+# tools). Cargo builds into
 # CARGO_TARGET_DIR when it is set, else into <repo>/target. On Windows also: Visual Studio
 # or its Build Tools with the C++ workload (vswhere.exe finds them), VCPKG_ROOT set to the
 # vcpkg root that scripts/windows-heif.ps1 prints (libheif comes from there), and PowerShell 7
@@ -75,7 +76,7 @@ if [ "$packager_version" != "cargo-packager 0.11.8" ]; then
     fail "this script is written for cargo-packager 0.11.8, and found ${packager_version:-no version}: cargo install cargo-packager --version 0.11.8 --locked"
 fi
 cargo about --version >/dev/null 2>&1 ||
-    fail "cargo-about is not installed: cargo install cargo-about --locked --features cli"
+    fail "cargo-about is not installed: cargo install cargo-about --version 0.9.3 --locked --features cli"
 if [ "$os" = windows ] && [ -z "${VCPKG_ROOT:-}" ]; then
     fail "VCPKG_ROOT is not set: run scripts/windows-heif.ps1 and set VCPKG_ROOT to the folder it prints on its last line"
 fi

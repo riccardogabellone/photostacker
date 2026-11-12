@@ -53,7 +53,7 @@ SmartScreen may say that it protected your PC from an unrecognised app: choose "
 To see which Mac you have, choose About This Mac in the Apple menu: it names a "Chip" (Apple silicon) or a "Processor" (Intel).
 
 1. Open the disk image, `Photostacker_<version>_aarch64.dmg` for Apple silicon or `Photostacker_<version>_x64.dmg` for Intel, and drag Photostacker into Applications.
-2. The first start says the app is damaged or from an unidentified developer, because it is not signed. Either run `xattr -dr com.apple.quarantine /Applications/Photostacker.app` in Terminal, or try to open the app once, then choose "Open Anyway" in System Settings, Privacy & Security.
+2. The first start says the app is damaged or from an unidentified developer, because it is not signed. Either run `xattr -dr com.apple.quarantine /Applications/Photostacker.app` in Terminal, or try to open the app once, then choose "Open Anyway" in System Settings, Privacy & Security (on macOS 11 and 12: System Preferences, Security & Privacy, General).
 
 The command-line tool is inside the app: `/Applications/Photostacker.app/Contents/MacOS/photostacker-cli`.
 
@@ -62,6 +62,8 @@ The command-line tool is inside the app: `/Applications/Photostacker.app/Content
 Choose `New job`, pick a folder of photos (or drop the folder on the window), and choose `Start`. When the scan ends, the review shows the proposed stacks: confirm or reject them, drag photos between them, then choose `Write <n> stacks`. Settings (the gear in the toolbar) holds the theme, the defaults of new jobs and the visual check.
 
 ## Using the command-line tool
+
+The examples assume `photostacker-cli` is on the `PATH`, as the Debian package puts it. On Windows and macOS it is inside the app's folder ([Installing](#installing) says where): give its full path there.
 
 ```sh
 photostacker-cli run <folder>                   # group the photos and write the stacks into <folder>/stacked
@@ -95,7 +97,9 @@ Jobs are kept in a local database, so a scan or a review can be closed and picke
 
 The visual check is off until you turn it on. When the hashes leave a stack in doubt, a model compares its photos by their look, on your computer, and splits those that only look alike. It needs two things:
 
-- **A model,** downloaded once. In the app's Settings, turn on `Check ambiguous stacks by their look`, then choose `Download` beside a model: dinov2-small (88 MB) is the default. The app asks before it downloads, and names every host it may reach. Without a network, `Import a file…` takes a model file you got elsewhere, checked against the model's SHA-256. The command-line tool shares the app's models: `photostacker-cli models download dinov2-small`, or `photostacker-cli models import dinov2-small <file>`. `photostacker-cli run` uses dinov2-small when it is installed; `--model` chooses another, and `--no-ml` none.
+- **A model,** downloaded once, which the app and the command-line tool share.
+  - In the app: in Settings, turn on `Check ambiguous stacks by their look`, then choose `Download` beside a model. dinov2-small (84 MB) is the default. The app asks before it downloads, and names every host it may reach. Without a network, `Import a file…` takes a model file you got elsewhere, checked against the model's SHA-256.
+  - With the command-line tool: `photostacker-cli models download dinov2-small`, or `photostacker-cli models import dinov2-small <file>`. `photostacker-cli run` uses dinov2-small when it is installed; `--model` chooses another, and `--no-ml` none.
 - **ONNX Runtime,** Microsoft's library that runs the model. Every package holds it. On a Mac with Apple silicon it needs macOS 14 or later: on macOS 11 to 13 the app runs without the visual check and says why. Built from source, see [Building from source](#building-from-source).
 
 Without either, the app and the tool work as before, and the visual check is skipped.
@@ -133,7 +137,7 @@ The first run also builds the HEIC decoder (libheif and libde265) with vcpkg, wh
 
 ### macOS
 
-The macOS build has not been run yet: these are the steps the project's workflows take. You need Xcode's command line tools, and cmake and pkg-config (here from [Homebrew](https://brew.sh)). `<prefix>` is the absolute path of any folder outside the repository.
+The macOS build has not been run yet: these steps follow what the project's workflows do. You need Xcode's command line tools, and cmake and pkg-config (here from [Homebrew](https://brew.sh)). `<prefix>` is the absolute path of any folder outside the repository.
 
 ```sh
 xcode-select --install
@@ -163,7 +167,7 @@ just run                                   # the desktop app
 
 ## Licence
 
-Photostacker is released under the [MIT licence](LICENSE). Its packages also carry other people's work under their own licences, named in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) together with the code ported from other projects and the bundled font. Among them, rawler (the RAW decoder) is under the LGPL-2.1, and libheif and libde265 (the HEIC decoder) under the LGPL-3.0; the notices say how to use changed copies of them. HEVC, the codec of HEIC photos, may be covered by patents in some countries: decoding it is the same grey area GIMP and ImageMagick ship with. The DINOv2 models are downloaded, not bundled; they are Apache-2.0.
+Photostacker is released under the [MIT licence](LICENSE). Its packages also carry other people's work under their own licences, named in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) together with the code ported from other projects and the bundled font. Among them, [rawler](https://github.com/dnglab/dnglab) (the RAW decoder) is under the LGPL-2.1, and [libheif](https://github.com/strukturag/libheif) and [libde265](https://github.com/strukturag/libde265) (the HEIC decoder) under the LGPL-3.0; the notices say how to use changed copies of them. HEVC, the codec of HEIC photos, may be covered by patents in some countries: decoding it is the same grey area GIMP and ImageMagick ship with. The DINOv2 models are downloaded, not bundled; they are Apache-2.0.
 
 ## Acknowledgements
 

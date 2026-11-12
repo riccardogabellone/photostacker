@@ -42,7 +42,7 @@ test *ARGS:
 deny:
     cargo deny check
 
-# scripts/licences.sh runs cargo-about (`cargo install cargo-about --locked --features cli`), which reads
+# scripts/licences.sh runs cargo-about (`cargo install cargo-about --version 0.9.3 --locked --features cli`), which reads
 # about.toml and the template in packaging/licenses. It needs the network: it fetches from GitHub the
 # licence files that some crates leave out of their package (about.toml's `git` clarifications). Not
 # part of `check`. scripts/package.sh runs the same script.

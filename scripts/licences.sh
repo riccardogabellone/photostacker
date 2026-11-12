@@ -5,7 +5,8 @@
 #
 # Usage (bash on Linux and macOS, Git Bash on Windows): scripts/licences.sh
 #
-# It needs cargo-about (`cargo install cargo-about --locked --features cli`), which reads
+# It needs cargo-about 0.9.3, the version the release workflow builds
+# (`cargo install cargo-about --version 0.9.3 --locked --features cli`), which reads
 # about.toml and the template in packaging/licenses, and the network: it fetches from
 # GitHub the licence files that some crates leave out of their package (about.toml's `git`
 # clarifications).
