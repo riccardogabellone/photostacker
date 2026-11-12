@@ -19,8 +19,9 @@
 # The archive is downloaded into a temporary folder beside the build's, its SHA-256 checked,
 # unpacked there, and only then is the build's folder renamed into place whole: an
 # interrupted run or a wrong download leaves nothing that looks installed, and the next run
-# starts again. Two runs at once each download a copy; one that finds, at the end, that the
-# other has installed the build keeps that install and drops its own copy.
+# starts again. Two runs at once each download a copy, and put it in place one at a time,
+# under the lock folder <cache>/<version>/.install.lock: one that finds the other has
+# installed the build keeps that install and drops its own copy.
 #
 # A .zip (the Windows build) is unpacked with unzip, which Git for Windows has.
 #
@@ -123,8 +124,12 @@ esac
 url="https://github.com/microsoft/onnxruntime/releases/download/v$version/$archive"
 mkdir -p "$dir"
 tmp=$(mktemp -d "$dir/.extract.XXXXXX")
-trap 'rm -rf "$tmp"' EXIT
-# A signal ends the script through exit, so the EXIT trap removes the temporary folder.
+# The seconds a run waits for another to finish putting a build in place (below).
+lock_wait=60
+locked=0
+trap 'rm -rf "$tmp"; if [ "$locked" = 1 ]; then rmdir "$lock"; fi' EXIT
+# A signal ends the script through exit, so the EXIT trap removes the temporary folder and
+# the lock.
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
@@ -148,6 +153,25 @@ esac
 if [ ! -s "$tmp/$stem/$library" ]; then
     fail "$archive holds no $stem/$library; nothing was installed"
 fi
+# The check, the removal and the move are done by one run at a time: a run holds the lock
+# folder (mkdir either makes it or fails, atomically) until it exits. A run that waits too
+# long never removes the lock, which may be a live run's; it takes another run's install
+# if there is one, and otherwise says how to clear a lock left by a run that was killed.
+lock="$dir/.install.lock"
+waited=0
+while ! mkdir "$lock" 2>/dev/null; do
+    if [ "$waited" -ge "$lock_wait" ]; then
+        if [ -s "$library_file" ]; then
+            echo "ONNX Runtime $version is installed in $home, and another run still holds $lock; that install is kept" >&2
+            print_path
+            exit 0
+        fi
+        fail "another run has held $lock for $lock_wait seconds, and ONNX Runtime $version is not installed in $home: if no other run of this script is going, delete $lock and run this script again"
+    fi
+    sleep 1
+    waited=$((waited + 1))
+done
+locked=1
 # Another run may have installed the build while this one downloaded it, and may already
 # have printed its path: that install is kept, not replaced.
 if [ -s "$library_file" ]; then
@@ -155,15 +179,9 @@ if [ -s "$library_file" ]; then
     print_path
     exit 0
 fi
-# A folder without the library is no install, and mv would move into it, not replace it.
+# A folder without the library is no install (nothing loads from it), and mv would move
+# into it, not replace it.
 rm -rf "$home"
 mv "$tmp/$stem" "$home"
-# Two runs that pass the check above together both get here, and the second mv moves its
-# copy into the first's install: that copy goes, and the first's install stays.
-if [ -e "$home/$stem" ]; then
-    rm -rf "${home:?}/$stem"
-    echo "ONNX Runtime $version was installed in $home by another run meanwhile; that install is kept" >&2
-else
-    echo "Installed ONNX Runtime $version in $home" >&2
-fi
+echo "Installed ONNX Runtime $version in $home" >&2
 print_path
