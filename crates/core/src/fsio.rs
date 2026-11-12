@@ -1,7 +1,9 @@
 //! File-system primitives of the writers: the output-folder check, the plan
 //! write that may replace, the no-clobber persistence of a finished file,
-//! and the folder sync after either (spec §2 anti-goals, §5.6).
+//! and the folder sync after either (spec §2 anti-goals, §5.6). Also how a
+//! path reads for the user, in the app and the CLI alike ([`display_path`]).
 
+use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
@@ -321,6 +323,32 @@ impl From<PersistError> for io::Error {
     }
 }
 
+/// A path as the user knows it: lossy where it is not valid Unicode, and without the
+/// Windows verbatim prefix the core's canonical paths carry ([`without_verbatim_prefix`]).
+/// For display only: a lossy result may not open.
+pub fn display_path(path: &Path) -> String {
+    without_verbatim_prefix(&path.to_string_lossy()).into_owned()
+}
+
+/// `text`, a path, without the Windows verbatim prefix: `\\?\C:\a` is `C:\a`, and
+/// `\\?\UNC\host\share\a` is `\\host\share\a`; any other text (a volume's verbatim path
+/// among them, which has no other form) is left as it is. Plain string work, the same on
+/// every platform.
+pub fn without_verbatim_prefix(text: &str) -> Cow<'_, str> {
+    let Some(rest) = text.strip_prefix(r"\\?\") else {
+        return Cow::Borrowed(text);
+    };
+    if let Some(share) = rest.strip_prefix(r"UNC\") {
+        return Cow::Owned(format!(r"\\{share}"));
+    }
+    let mut chars = rest.chars();
+    let drive = chars
+        .next()
+        .is_some_and(|letter| letter.is_ascii_alphabetic())
+        && chars.next() == Some(':');
+    Cow::Borrowed(if drive { rest } else { text })
+}
+
 /// Why the output folder cannot receive the stacks.
 #[derive(Debug, thiserror::Error)]
 #[error("output folder {}: {reason}", path.display())]
@@ -615,6 +643,31 @@ mod tests {
         assert_eq!(entries(dir.path()), ["a.psd.partial"]);
         drop(partial);
         assert!(entries(dir.path()).is_empty());
+    }
+
+    #[test]
+    fn a_verbatim_windows_path_is_shown_without_its_prefix() {
+        assert_eq!(display_path(Path::new(r"\\?\C:\a")), r"C:\a");
+        assert_eq!(
+            display_path(Path::new(r"\\?\UNC\host\share")),
+            r"\\host\share"
+        );
+        assert_eq!(display_path(Path::new(r"C:\a")), r"C:\a");
+        assert_eq!(display_path(Path::new("/photos/trip")), "/photos/trip");
+    }
+
+    #[test]
+    fn only_a_drive_or_share_loses_its_verbatim_prefix() {
+        let strip = |text: &str| without_verbatim_prefix(text).into_owned();
+        assert_eq!(strip(r"\\?\C:\x"), r"C:\x");
+        assert_eq!(strip(r"\\?\d:\out\a_3.psd"), r"d:\out\a_3.psd");
+        assert_eq!(strip(r"\\?\UNC\server\share\x"), r"\\server\share\x");
+        // Anything else is left alone: a volume's verbatim path has no other form.
+        let volume = r"\\?\Volume{0123abcd}\x";
+        assert_eq!(strip(volume), volume);
+        assert_eq!(strip(r"C:\x"), r"C:\x");
+        assert_eq!(strip(r"\\server\share\x"), r"\\server\share\x");
+        assert_eq!(strip("/photos/trip"), "/photos/trip");
     }
 
     #[test]

@@ -6,6 +6,7 @@
 use std::path::Path;
 
 use photostacker_core::AppDirs;
+use photostacker_core::fsio::display_path;
 
 use crate::{Failure, print_lines};
 
@@ -46,7 +47,7 @@ fn visual_check_line() -> String {
     match runtime::loaded_version() {
         Ok(version) => format!(
             "visual check: ONNX Runtime {version} at {}",
-            runtime::environment_library().display()
+            display_path(runtime::environment_library())
         ),
         Err(ModelError::Runtime(reason)) => format!("visual check: {reason}"),
         Err(error) => format!("visual check: {error}"),
@@ -62,7 +63,7 @@ fn visual_check_line() -> String {
 /// in.
 fn data_line(data: Option<&Path>) -> String {
     match data {
-        Some(data) => format!("data: {}", data.display()),
+        Some(data) => format!("data: {}", display_path(data)),
         None => "data: none".to_owned(),
     }
 }

@@ -9,6 +9,7 @@ use std::sync::Arc;
 use assert_cmd::Command;
 use assert_cmd::assert::Assert;
 use photostacker_core::appdirs::DATA_DIR_ENV;
+use photostacker_core::fsio::display_path;
 use photostacker_core::model::RawTone;
 use photostacker_core::models::MODELS;
 use photostacker_core::{AppDirs, Engine, EngineOptions, PlanV1, Store};
@@ -331,6 +332,12 @@ fn stdout_paths(assert: &Assert) -> Vec<PathBuf> {
         .collect()
 }
 
+/// The absolute path of the existing `path` as the CLI prints it: canonical, and on
+/// Windows without the verbatim `\\?\` prefix that canonical paths carry there.
+fn printed(path: &Path) -> PathBuf {
+    PathBuf::from(display_path(&path.canonicalize().unwrap()))
+}
+
 /// The names of the entries of `dir`, sorted.
 fn entries(dir: &Path) -> Vec<String> {
     let mut names: Vec<String> = fs::read_dir(dir)
@@ -370,7 +377,7 @@ fn run_writes_one_psd_per_group_and_prints_paths() {
     let assert = photostacker().arg("run").arg(&input).assert().success();
 
     // The default output folder, `<input>/stacked`; the paths are absolute.
-    let output = input.join("stacked").canonicalize().unwrap();
+    let output = printed(&input.join("stacked"));
     assert_eq!(
         stdout_paths(&assert),
         [output.join("IMG_0001_3.psd"), output.join("IMG_0004_3.psd")]
@@ -406,7 +413,7 @@ fn run_twice_never_overwrites() {
     let first_bytes = fs::read(&first[0]).unwrap();
     let second = stdout_paths(&run());
 
-    let output = output.canonicalize().unwrap();
+    let output = printed(&output);
     assert_eq!(first, [output.join("IMG_0001_3.psd")]);
     assert_eq!(second, [output.join("IMG_0001_3-1.psd")]);
     assert_eq!(fs::read(&first[0]).unwrap(), first_bytes);
@@ -458,7 +465,7 @@ fn format_tiff_writes_tif() {
         .assert()
         .success();
 
-    let path = output.canonicalize().unwrap().join("IMG_0001_3.tif");
+    let path = printed(&output).join("IMG_0001_3.tif");
     assert_eq!(stdout_paths(&assert), std::slice::from_ref(&path));
     // A big-endian classic TIFF.
     assert_eq!(fs::read(&path).unwrap()[..4], *b"MM\0*");
@@ -487,7 +494,7 @@ fn run_with_plan_writes_the_plan_and_the_stacks() {
     let plan = read_plan(&plan_file);
     assert!(plan.config.auto_confirm);
     assert_eq!(plan.groups[0].files, paths(&BRACKET));
-    let path = output.canonicalize().unwrap().join("IMG_0001_3.psd");
+    let path = printed(&output).join("IMG_0001_3.psd");
     assert_eq!(stdout_paths(&assert), [path]);
 }
 
@@ -571,7 +578,7 @@ fn run_names_each_per_file_error() {
         assert!(line.starts_with(&prefix), "{line:?} is not {prefix:?}…");
         assert!(line.len() > prefix.len(), "{line:?} gives no reason");
     }
-    let path = root.path().join("out").canonicalize().unwrap();
+    let path = printed(&root.path().join("out"));
     assert_eq!(stdout_paths(&assert), [path.join("IMG_0001_3.psd")]);
     let summary = format!(
         "{} files, 1 groups, 0 unstacked, {} errors; 1 written, 0 skipped, 0 failed",
@@ -579,6 +586,103 @@ fn run_names_each_per_file_error() {
         failed.len()
     );
     assert!(stderr.contains(&summary), "{summary:?} not in {stderr}");
+}
+
+/// Gives the JPEG at `path` an ICC profile, in an APP2 segment right after its
+/// start-of-image marker: the other members of its stack then get a writing
+/// warning each (`IccMismatch`, spec §5.5).
+#[cfg(windows)]
+fn with_icc_profile(path: &Path) {
+    let jpeg = fs::read(path).unwrap();
+    let icc = photostacker_testkit::icc_stub(b"mntr", b"RGB ");
+    let payload = [b"ICC_PROFILE\0".as_slice(), &[1, 1], &icc].concat();
+    let len = u16::try_from(payload.len() + 2).unwrap();
+    let segment = [&[0xFF, 0xE2][..], &len.to_be_bytes(), &payload].concat();
+    fs::write(path, [&jpeg[..2], &segment, &jpeg[2..]].concat()).unwrap();
+}
+
+/// On Windows a canonical path carries the verbatim `\\?\` prefix: the
+/// engine's output paths do, and so do the photos' paths when the input is
+/// given in that form, as a script may give it. The CLI prints none of it:
+/// not in the stacks' paths on stdout, nor in the files its `error:` and
+/// `warning:` lines name.
+#[cfg(windows)]
+#[test]
+fn the_paths_the_cli_prints_are_plain() {
+    let root = tempfile::tempdir().unwrap();
+    let input = root.path().join("photos");
+    write_bracket(&input, BRACKET);
+    with_icc_profile(&input.join(BRACKET[0]));
+    fs::write(input.join("zz-garbage.jpg"), b"not a photo at all").unwrap();
+    let output = root.path().join("out");
+    let verbatim = input.canonicalize().unwrap();
+    assert!(verbatim.to_str().unwrap().starts_with(r"\\?\"));
+
+    let assert = photostacker()
+        .arg("run")
+        .arg(&verbatim)
+        .arg("-o")
+        .arg(&output)
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
+    let named: Vec<&str> = stderr
+        .lines()
+        .filter(|line| line.starts_with("error: ") || line.starts_with("warning: "))
+        .collect();
+    assert!(
+        named.iter().any(|line| line.contains("zz-garbage.jpg")),
+        "{stderr}"
+    );
+    // The two shots without the first one's profile, each by its full path.
+    let warned: Vec<&&str> = named
+        .iter()
+        .filter(|line| line.starts_with("warning: "))
+        .collect();
+    assert_eq!(warned.len(), 2, "{stderr}");
+    for (line, name) in warned.iter().zip(&BRACKET[1..]) {
+        let file = display_path(&verbatim.join(name));
+        assert!(line.starts_with(&format!("warning: {file}: ")), "{line:?}");
+    }
+    for line in stdout.lines().chain(named) {
+        assert!(!line.contains(r"\\?\"), "{line:?}");
+    }
+    assert_eq!(
+        stdout_paths(&assert),
+        [printed(&output).join("IMG_0001_3.psd")]
+    );
+}
+
+/// A folder whose name is not ASCII (an accented letter, CJK characters) works
+/// as the input, with the output folder and the job database inside it: the
+/// run writes its stack there and prints its path.
+#[test]
+fn folders_with_names_outside_ascii_work() {
+    let root = tempfile::tempdir().unwrap();
+    let input = root.path().join("séance 日本");
+    write_bracket(&input, BRACKET);
+    let output = input.join("piles 日本");
+    let db = input.join("tâches 日本.db");
+
+    let assert = photostacker()
+        .arg("run")
+        .arg(&input)
+        .arg("-o")
+        .arg(&output)
+        .arg("--db")
+        .arg(&db)
+        .assert()
+        .success();
+
+    let stack = printed(&output).join("IMG_0001_3.psd");
+    assert_eq!(stdout_paths(&assert), std::slice::from_ref(&stack));
+    assert_stack_of(&stack, BRACKET);
+    let jobs = Store::open_read_only(&db).unwrap().jobs().unwrap();
+    assert_eq!(jobs.len(), 1, "{jobs:?}");
+    assert_eq!(jobs[0].config.input_dir, input);
+    assert_eq!(jobs[0].config.output_dir, output);
 }
 
 /// rawler logs recoverable trouble through `log`, at error level too (a

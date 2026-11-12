@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 use anyhow::anyhow;
 use clap::Subcommand;
 use photostacker_core::AppDirs;
+#[cfg(feature = "ml")]
+use photostacker_core::fsio::display_path;
 use photostacker_core::models::{self, MODELS, ModelSpec};
 
 use crate::{Failure, print_lines};
@@ -164,7 +166,7 @@ fn import(spec: &ModelSpec, file: &Path) -> Result<(), Failure> {
 
 #[cfg(feature = "ml")]
 fn print_installed(file: &Path) -> Result<(), Failure> {
-    print_lines(&[file.display().to_string()])
+    print_lines(&[display_path(file)])
 }
 
 /// Which download progress reports get a line: the first one, then one

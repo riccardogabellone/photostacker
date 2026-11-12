@@ -54,7 +54,7 @@ pub fn loaded_version() -> Result<String, ModelError> {
     version_of_loaded(library).map_err(|reason| {
         ModelError::Runtime(format!(
             "ONNX Runtime at {} did not give its version: {reason}",
-            library.display()
+            crate::fsio::display_path(library)
         ))
     })
 }
@@ -173,11 +173,14 @@ impl LibraryProblem {
     pub(crate) fn refusal(&self, library: &Path) -> String {
         match self {
             LibraryProblem::Missing => {
-                format!("ONNX Runtime not found at {}", library.display())
+                format!(
+                    "ONNX Runtime not found at {}",
+                    crate::fsio::display_path(library)
+                )
             }
             LibraryProblem::NeedsMacos { needed, running } => format!(
                 "ONNX Runtime at {} needs macOS {needed} or later; this is macOS {running}",
-                library.display()
+                crate::fsio::display_path(library)
             ),
         }
     }
