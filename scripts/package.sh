@@ -76,8 +76,12 @@ packager_version=$(cargo packager --version 2>/dev/null | tr -d '\r') ||
 if [ "$packager_version" != "cargo-packager 0.11.8" ]; then
     fail "this script is written for cargo-packager 0.11.8, and found ${packager_version:-no version}: cargo install cargo-packager --version 0.11.8 --locked"
 fi
-cargo about --version >/dev/null 2>&1 ||
+# scripts/licences.sh, which makes the licences file with it, needs this version.
+about_version=$(cargo about --version 2>/dev/null | tr -d '\r') ||
     fail "cargo-about is not installed: cargo install cargo-about --version 0.9.3 --locked --features cli"
+if [ "$about_version" != "cargo-about 0.9.3" ]; then
+    fail "this script is written for cargo-about 0.9.3, and found ${about_version:-no version}: cargo install cargo-about --version 0.9.3 --locked --features cli"
+fi
 if [ "$os" = windows ] && [ -z "${VCPKG_ROOT:-}" ]; then
     fail "VCPKG_ROOT is not set: run scripts/windows-heif.ps1 and set VCPKG_ROOT to the folder it prints on its last line"
 fi
