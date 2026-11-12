@@ -21,7 +21,7 @@ Every package holds the two executables, `Photostacker` (the desktop app) and `p
 | NSIS `.exe`, `.msi`, `.zip` | the app's folder | `onnxruntime.dll`, beside the executables | beside the executables |
 | `.dmg` | `Photostacker.app/Contents/MacOS` | `Contents/Frameworks/libonnxruntime.dylib` | `Contents/Resources/licenses` |
 
-The Windows packages also carry the Visual C++ runtime beside the executables (`msvcp140.dll`, `msvcp140_1.dll`, `vcruntime140.dll`, `vcruntime140_1.dll`), and the AppImage carries `libde265.so.0`. The NSIS installer installs for the current user, into `%LOCALAPPDATA%\Photostacker` unless told otherwise.
+The Windows packages also carry beside the executables every Visual C++ runtime DLL that the two executables and ONNX Runtime name: today `msvcp140.dll`, `msvcp140_1.dll`, `vcruntime140.dll` and `vcruntime140_1.dll`. The AppImage carries `libde265.so.0`. The NSIS installer installs for the current user, into `%LOCALAPPDATA%\Photostacker` unless told otherwise.
 
 The packages land in `dist/packages`:
 
@@ -51,12 +51,12 @@ just package dmg             # macOS
 scripts/package.sh nsis,wix  # Windows, in Git Bash
 ```
 
-On macOS, build libde265 with `scripts/libde265.sh <prefix>` first, and set `CMAKE_PREFIX_PATH` and `PKG_CONFIG_LIBDIR` as [AGENTS.md](../AGENTS.md#environment) says. On Windows, run `pwsh scripts/windows-heif.ps1` first, and set `VCPKG_ROOT` to the folder it prints on its last line: libheif comes from there. The Visual C++ runtime is copied from the redistributable folder of the newest Visual Studio installation that `vswhere.exe` finds: the highest version there that has all four files.
+On macOS, build libde265 with `scripts/libde265.sh <prefix>` first, and set `CMAKE_PREFIX_PATH` and `PKG_CONFIG_LIBDIR` as [AGENTS.md](../AGENTS.md#environment) says. On Windows, run `pwsh scripts/windows-heif.ps1` first, and set `VCPKG_ROOT` to the folder it prints on its last line: libheif comes from there. The Visual C++ runtime is copied from the redistributable folder of the newest Visual Studio installation that `vswhere.exe` finds: the highest version there that has every runtime DLL the two executables and ONNX Runtime name. `scripts/vc-runtime.sh` reads those names from the files.
 
 The script:
 
 1. builds both executables (`cargo build --release --locked`), into `CARGO_TARGET_DIR` when it is set, else into `target/`;
-2. stages in `dist/package` what the packages carry besides the executables: the `licenses` folder (`THIRD-PARTY-LICENSES.md` made by `scripts/licences.sh`, the script `just licences` runs), ONNX Runtime's library under its plain name, and on Windows the Visual C++ runtime;
+2. stages in `dist/package` what the packages carry besides the executables: the `licenses` folder (`THIRD-PARTY-LICENSES.md` made by `scripts/licences.sh`, the script `just licences` runs), ONNX Runtime's library under its plain name, and on Windows the Visual C++ runtime DLLs that the files name;
 3. runs `cargo packager` from `crates/ui`, which copies everything in `dist/package/resources` into the package's resource folder at the same paths, and on macOS `dist/package/frameworks/libonnxruntime.dylib` into `Contents/Frameworks`;
 4. on Windows, zips the app's folder with PowerShell's `Compress-Archive`.
 
@@ -70,10 +70,10 @@ just smoke dist/packages/*.dmg                                   # macOS
 scripts/smoke.sh dist/packages/*.zip dist/packages/*.exe dist/packages/*.msi  # Windows, in Git Bash
 ```
 
-These install nothing. For each package, `scripts/smoke.sh` unpacks it in a scratch folder (`dpkg -x`, `--appimage-extract`, a read-only `hdiutil attach`, `Expand-Archive`) and checks it. The NSIS installer and the MSI are only checked to exist and not be empty: the portable zip holds the same files, and gets the full check. The checks:
+These install nothing. For each package, `scripts/smoke.sh` unpacks it in a scratch folder (`dpkg -x`, `--appimage-extract`, a read-only `hdiutil attach`, `Expand-Archive`, and for the MSI `msiexec /a`, an administrative unpack, which only writes the files there) and checks it. The NSIS installer is only checked to exist and not be empty: the portable zip holds the same files, and gets the full check. The checks:
 
-- **contents:** both executables, ONNX Runtime's library and the eight licence files where the app looks for them; on Windows the Visual C++ runtime; in the AppImage `libde265.so.0`, which its executables load;
-- **links:** on Linux each executable links only `libde265.so.0` and the C and C++ runtimes; on macOS only libraries under `/usr/lib/` and `/System/Library/`; on Windows no libheif, libde265 or x265 DLL is in the package, and the tool runs with only Windows' own folders on the `PATH`;
+- **contents:** both executables, ONNX Runtime's library and the eight licence files where the app looks for them; in the AppImage `libde265.so.0`, which its executables load;
+- **links:** on Linux each executable links only `libde265.so.0` and the C and C++ runtimes; on macOS only libraries under `/usr/lib/` and `/System/Library/`; on Windows every Visual C++ runtime DLL that the two executables and ONNX Runtime name is beside them (a development machine or a runner has them all in System32, so only this check shows one missing, as a clean Windows has none), no libheif, libde265 or x265 DLL is in the package, and the tool runs with only Windows' own folders on the `PATH`;
 - **macOS:** every Mach-O file needs macOS 11.0, but ONNX Runtime on Apple silicon, which needs 14.0;
 - **runs:** with `ORT_DYLIB_PATH` unset and a scratch data folder, `photostacker-cli info` names the version in the package's file name, libde265 as the HEVC decoder, and the ONNX Runtime pinned for the system, loaded from the package; a dry run over `crates/core/tests/fixtures/heic` reads every HEIC file there, with no error.
 

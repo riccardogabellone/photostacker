@@ -24,16 +24,20 @@
 #                   uninstaller would delete them, and both end a running Photostacker without
 #                   asking. So nothing the install touches was there before it, and nothing
 #                   needs putting back.
-#   .msi            only checked to exist and not be empty: installing it needs elevation
+#   .msi            msiexec's administrative unpack (/a) into a scratch folder, which installs
+#                   nothing: it only writes the files there, as the MSI would install them.
+#                   A real install is never made: it needs elevation
 #   -portable.zip   Expand-Archive into a scratch folder; it holds the files the installers
 #                   install
 # and then checked:
 #   contents   both executables; ONNX Runtime's library where the app looks for it and the
-#              eight files of the licenses folder (spec §8.3, §11.3); on Windows the Visual
-#              C++ runtime; in the AppImage, libde265.so.0
+#              eight files of the licenses folder (spec §8.3, §11.3); in the AppImage,
+#              libde265.so.0
 #   links      Linux: each executable links only the C and C++ runtimes and libde265; macOS:
-#              only the system's own libraries; Windows: no libheif, libde265 or x265 DLL in
-#              the package, and the tool runs with a PATH of Windows' own folders only
+#              only the system's own libraries; Windows: every Visual C++ runtime DLL that
+#              the two executables and ONNX Runtime name is beside them
+#              (scripts/vc-runtime.sh), no libheif, libde265 or x265 DLL is in the package,
+#              and the tool runs with a PATH of Windows' own folders only
 #   macOS      the minimum macOS of every Mach-O file: 11.0, but 14.0 for ONNX Runtime on
 #              Apple silicon
 #   runs       `photostacker-cli info` names the version in the package's name, libde265,
@@ -46,8 +50,8 @@
 # in the scratch folder, which is removed at the end.
 #
 # Needs: Linux: dpkg, objdump (binutils), ldd; apt-get for --install. macOS: hdiutil,
-# otool, file. Windows (Git Bash): cygpath, PowerShell for the zip, and reg.exe and
-# tasklist.exe for --install.
+# otool, file. Windows (Git Bash): cygpath, PowerShell for the zip and the MSI, msiexec.exe,
+# and reg.exe and tasklist.exe for --install.
 #
 # macOS has bash 3.2 and BSD tools: no associative arrays, no mapfile, no readlink -f.
 set -euo pipefail
@@ -265,6 +269,31 @@ uninstall_nsis() {
     windows_command "$1/uninstall.exe" /S "_?=$(native "$1")"
 }
 
+# Unpacks the MSI $1 into the folder $2, which must have no space in its path, with
+# msiexec's administrative install (/a): it only writes the files into $2, as the MSI would
+# install them, plus a copy of the MSI. Nothing is installed, no registry key is written and
+# the system's list of apps does not change. msiexec returns before it is done unless it is
+# waited for, so PowerShell starts it and waits. On a failure, the end of msiexec's log ($3)
+# is printed.
+unpack_msi() {
+    local msi target log
+    # Single quotes in a PowerShell string are doubled.
+    msi=$(native "$1" | sed "s/'/''/g")
+    target=$(native "$2" | sed "s/'/''/g")
+    log=$(native "$3" | sed "s/'/''/g")
+    windows_command "$powershell" -NoProfile -NonInteractive -Command "
+        \$ErrorActionPreference = 'Stop'
+        \$arguments = '/a \"$msi\" /qn TARGETDIR=$target /l*v \"$log\"'
+        \$process = Start-Process -FilePath msiexec.exe -ArgumentList \$arguments -Wait -PassThru
+        if (\$process.ExitCode -ne 0) {
+            if (Test-Path -LiteralPath '$log') {
+                Get-Content -LiteralPath '$log' -Tail 40 | Write-Host
+            }
+            Write-Host \"msiexec \$arguments ended with exit status \$(\$process.ExitCode)\"
+        }
+        exit \$process.ExitCode"
+}
+
 # What is at $1, for a failure's "found".
 describe() {
     if [ -L "$1" ]; then
@@ -301,12 +330,6 @@ check_contents() {
         expect_file "$res_dir/licenses/$name" "contents"
     done
     ok "contents: Photostacker$exe and photostacker-cli$exe in $bin_dir, $library in $lib_dir, the eight licence files in $res_dir/licenses"
-    if [ "$os" = windows ]; then
-        for name in msvcp140.dll msvcp140_1.dll vcruntime140.dll vcruntime140_1.dll; do
-            expect_file "$bin_dir/$name" "contents"
-        done
-        ok "contents: the Visual C++ runtime (msvcp140.dll, msvcp140_1.dll, vcruntime140.dll, vcruntime140_1.dll) in $bin_dir"
-    fi
 }
 
 # Linux: the libraries each executable names (NEEDED) are the C and C++ runtimes and
@@ -351,10 +374,14 @@ check_links_macos() {
     done
 }
 
-# Windows: no tool here reads a DLL's imports, so: no HEIC library ships as a DLL (libheif
-# and libde265 are built in), and the runs below have only Windows' own folders on the PATH.
+# Windows: every Visual C++ runtime DLL the two executables and ONNX Runtime name is beside
+# them, since a clean Windows has none, though every machine this runs on has them all in
+# System32 (scripts/vc-runtime.sh says how the names are read); no HEIC library ships as a
+# DLL (libheif and libde265 are built in); and the runs below have only Windows' own folders
+# on the PATH.
 check_links_windows() {
     local found
+    "$repo/scripts/vc-runtime.sh" check "$bin_dir" || exit 1
     found=$(find "$root" -type f \( -iname '*heif*.dll' -o -iname '*de265*.dll' -o -iname '*x265*.dll' \))
     if [ -n "$found" ]; then
         fail "links: expected no libheif, libde265 or x265 DLL in the package, found $found"
@@ -586,11 +613,26 @@ for package in "${packages[@]}"; do
             ok "installed silently into $(native "$root")"
             ;;
         windows:*.msi)
-            if [ ! -s "$package" ]; then
-                fail "$name: expected an installer, found an empty file"
+            # The MSI is never installed, which needs elevation: its administrative unpack
+            # gives the files it would install. In cargo-packager 0.11.8's WiX template
+            # (main.wxs), the unpack's root is TARGETDIR, the Program Files folder in it is
+            # named PFiles, and INSTALLDIR, which holds every file, PFiles\Photostacker.
+            root="$scratch/msi"
+            # msiexec takes TARGETDIR=<folder> unquoted, so it must have no space.
+            case "$(native "$root")" in
+                *' '*) fail "$name: expected a folder without spaces to unpack it into, found $(native "$root")" ;;
+            esac
+            # msiexec's status can pass 255, which a shell's status cannot hold: the lines
+            # before the failure give it.
+            unpack_msi "$package" "$root" "$scratch/msi.log" ||
+                fail "$name: expected msiexec /a to unpack it into $(native "$root"), found it failed (the end of its log and its exit status are above)"
+            bin_dir="$root/PFiles/Photostacker"
+            if [ ! -f "$bin_dir/Photostacker.exe" ]; then
+                line=$(find "$root" -iname 'Photostacker.exe' | sed -n 1p)
+                fail "$name: expected the unpack to put Photostacker.exe in $(native "$bin_dir"), found ${line:-no Photostacker.exe in $(native "$root")}"
             fi
-            ok "$name exists and is not empty; it is not installed here, which needs elevation"
-            continue
+            lib_dir=$bin_dir res_dir=$bin_dir
+            ok "unpacked with msiexec /a into $(native "$root"); nothing is installed"
             ;;
         windows:*-portable.zip)
             root="$scratch/zip"

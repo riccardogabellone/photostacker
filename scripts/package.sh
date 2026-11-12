@@ -8,9 +8,10 @@
 # 1. Builds the desktop app and photostacker-cli (release, default features).
 # 2. Stages in dist/package what a package carries besides the two executables:
 #    resources/licenses/ (the eight files of spec §11.3); on Linux and Windows ONNX Runtime's
-#    library in resources/, and on Windows the Visual C++ runtime beside it; on macOS the
-#    library in frameworks/. The packager copies resources/ into the package's resource
-#    folder at the same paths (crates/ui/Cargo.toml).
+#    library in resources/, and on Windows beside it every Visual C++ runtime DLL that the
+#    executables and the library name (scripts/vc-runtime.sh); on macOS the library in
+#    frameworks/. The packager copies resources/ into the package's resource folder at the
+#    same paths (crates/ui/Cargo.toml).
 # 3. Runs `cargo packager` from crates/ui, whose Cargo.toml holds the configuration, into
 #    dist/packages.
 # 4. On Windows, zips the app's folder too: Photostacker_<version>_x64-portable.zip.
@@ -23,9 +24,9 @@
 # (ONNX Runtime's archive, the licence files cargo-about fetches, cargo-packager's own
 # tools). Cargo builds into
 # CARGO_TARGET_DIR when it is set, else into <repo>/target. On Windows also: Visual Studio
-# or its Build Tools with the C++ workload (vswhere.exe finds them), VCPKG_ROOT set to the
-# vcpkg root that scripts/windows-heif.ps1 prints (libheif comes from there), and PowerShell 7
-# (pwsh).
+# or its Build Tools with the C++ workload (vswhere.exe finds them, and their redistributable
+# folder gives the Visual C++ runtime), VCPKG_ROOT set to the vcpkg root that
+# scripts/windows-heif.ps1 prints (libheif comes from there), and PowerShell 7 (pwsh).
 #
 # macOS has bash 3.2 and BSD tools: no associative arrays, no mapfile, no readlink -f.
 set -euo pipefail
@@ -104,48 +105,6 @@ rm -rf "$stage" "$out"
 mkdir -p "$stage/resources/licenses" "$out"
 licenses="$stage/resources/licenses"
 
-# The Visual C++ runtime that ONNX Runtime and the app need, from the redistributable folder
-# of the newest Visual Studio installation: the highest version there that has all four
-# files, copied into $1.
-vc_runtime_files="msvcp140.dll msvcp140_1.dll vcruntime140.dll vcruntime140_1.dll"
-copy_vc_runtime() {
-    local dest=$1 program_files vswhere vs redist msvc crt file complete found=
-    program_files=$(printenv 'ProgramFiles(x86)' || true)
-    vswhere="$(cygpath -u "${program_files:-C:\\Program Files (x86)}")/Microsoft Visual Studio/Installer/vswhere.exe"
-    if [ ! -f "$vswhere" ]; then
-        fail "vswhere.exe is not at $vswhere: install Visual Studio or its Build Tools, with the C++ workload"
-    fi
-    # Among several installations, the newest with the C++ tools, which install the
-    # redistributable folder.
-    vs=$("$vswhere" -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 \
-        -property installationPath | tr -d '\r')
-    if [ -z "$vs" ]; then
-        fail "vswhere.exe found no Visual Studio installation with the C++ tools: install the C++ workload of Visual Studio or its Build Tools"
-    fi
-    redist="$(cygpath -u "$vs")/VC/Redist/MSVC"
-    # Version folders (14.44.35112) and others (v143); sort -V puts the highest first.
-    for msvc in $(ls -1 "$redist" 2>/dev/null | sort -rV); do
-        for crt in "$redist/$msvc"/x64/Microsoft.VC*.CRT; do
-            [ -d "$crt" ] || continue
-            complete=1
-            for file in $vc_runtime_files; do
-                [ -f "$crt/$file" ] || complete=0
-            done
-            if [ "$complete" = 1 ]; then
-                found=$crt
-                break 2
-            fi
-        done
-    done
-    if [ -z "$found" ]; then
-        fail "no version in $redist has all of $vc_runtime_files in x64/Microsoft.VC*.CRT: install the C++ workload of Visual Studio"
-    fi
-    for file in $vc_runtime_files; do
-        cp "$found/$file" "$dest/$file"
-    done
-    echo "Visual C++ runtime: $found" >&2
-}
-
 echo "Building Photostacker and photostacker-cli into $target_dir" >&2
 cargo build --release --locked -p photostacker-ui -p photostacker-cli
 
@@ -181,7 +140,10 @@ case "$os" in
     linux) cp -L "$library" "$stage/resources/libonnxruntime.so" ;;
     windows)
         cp -L "$library" "$stage/resources/onnxruntime.dll"
-        copy_vc_runtime "$stage/resources"
+        # Every Visual C++ runtime DLL that the two executables and ONNX Runtime name, which
+        # scripts/smoke.sh checks the package for.
+        scripts/vc-runtime.sh copy "$stage/resources" "$release/Photostacker.exe" \
+            "$release/photostacker-cli.exe" "$stage/resources/onnxruntime.dll"
         ;;
     macos)
         mkdir -p "$stage/frameworks"
