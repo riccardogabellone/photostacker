@@ -16,10 +16,11 @@
 # codec, as on the other systems (spec §3).
 #
 # The root is a folder of the script's own: one that does not exist yet, an empty one, or
-# one this script made before, which it marks with the file `.git\photostacker-vcpkg` before
-# anything else (a folder holding only a `.git` with no commit and no remote, what a run
-# stopped before the mark leaves, is taken back too). Any other folder (someone's own vcpkg, a folder of files) is refused untouched: the script
-# rewrites its checkout by force and deletes what vcpkg installed there.
+# one this script made before, which it marks with the file `.git\photostacker-vcpkg`
+# before it puts anything else there. A run stopped while writing the mark can leave a root
+# holding only an empty `.git` folder, and that is taken back too. Any other folder
+# (someone's own vcpkg, a folder of files) is refused untouched: the script rewrites its
+# checkout by force and deletes what vcpkg installed there.
 #
 # The first run needs git and the network: it fetches the pinned commit (that commit only,
 # not vcpkg's history), bootstraps vcpkg (which downloads vcpkg.exe), and builds the two
@@ -76,23 +77,35 @@ function Assert-OutsideRepository {
     }
 }
 
-# True when $Root holds nothing but a `.git` folder with no commit and no remote: what a
-# run stopped between making the folder and marking it leaves (an empty `.git`, or
-# `git init`'s bare result). Nothing in it is anyone's work.
+# True when $Root holds nothing but an empty `.git` folder that is a folder itself, not a
+# junction or a link: the one unmarked state a run of this script leaves besides an empty
+# root, when it stopped after making `.git` for the mark and before writing the mark into
+# it. The script writes the mark before anything else in the root, so nothing else
+# unmarked can be its own. No git command decides it: a `.git` that git cannot read is someone else's too.
 function Test-InterruptedStart {
     $entries = @(Get-ChildItem -LiteralPath $Root -Force)
-    if ($entries.Count -ne 1 -or $entries[0].Name -ne '.git' -or -not $entries[0].PSIsContainer) {
+    if ($entries.Count -ne 1) {
         return $false
     }
-    git -C $Root rev-parse --verify --quiet HEAD 2>$null | Out-Null
-    $hasCommit = $LASTEXITCODE -eq 0
-    $remotes = @(git -C $Root remote 2>$null)
-    return -not $hasCommit -and $remotes.Count -eq 0
+    $git = $entries[0]
+    if ($git.Name -ne '.git' -or -not $git.PSIsContainer) {
+        return $false
+    }
+    if ($git.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+        return $false
+    }
+    try {
+        return @(Get-ChildItem -LiteralPath $git.FullName -Force).Count -eq 0
+    }
+    catch {
+        # A `.git` whose entries cannot be listed is not known to be empty.
+        return $false
+    }
 }
 
-# Stops unless $Root is this script's to use: missing, an empty folder, marked as made by it,
-# or left so by a run of it that stopped before the mark. Nothing in a refused folder is
-# touched.
+# Stops unless $Root is this script's to use: missing, an empty folder, marked as made by
+# it, or holding only the empty `.git` folder that a run of it stopped before the mark
+# leaves. Nothing in a refused folder is touched.
 function Assert-OwnRoot {
     if (-not (Test-Path -LiteralPath $Root)) {
         return
@@ -107,7 +120,7 @@ function Assert-OwnRoot {
         return
     }
     if (Get-ChildItem -LiteralPath $Root -Force | Select-Object -First 1) {
-        throw "$Root holds files this script did not put there, and nothing in it was changed: pass -Root with a folder that does not exist yet, an empty one, or the one this script made before."
+        throw "$Root holds files or folders this script did not put there, and nothing in it was changed: pass -Root with a folder that does not exist yet, an empty one, or the one this script made before."
     }
 }
 
