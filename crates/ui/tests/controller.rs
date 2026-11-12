@@ -2612,7 +2612,8 @@ fn importing_asks_for_a_file_and_installs_it() {
     platform.files.lock().unwrap().push_back(file.clone());
     controller.import_model("dinov2-small");
     wait_until(&mut controller, "the model installed", |controller| {
-        model_view(controller, "dinov2-small").is_some_and(|view| view.installed)
+        model_view(controller, "dinov2-small")
+            .is_some_and(|view| view.installed && view.activity == ModelActivity::Idle)
     });
 
     assert_eq!(installer.imported(), [file]);
