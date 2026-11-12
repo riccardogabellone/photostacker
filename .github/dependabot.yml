@@ -1,6 +1,6 @@
 # The actions the workflows and the shared build inputs use, pinned to commits: once a
-# month, one grouped pull request per folder moves them, with the version comments beside
-# the commits. "/" covers .github/workflows and an action.yml at the root only, so the
+# month Dependabot proposes their updates, grouped, with the version comments beside the
+# commits. "/" covers .github/workflows and an action.yml at the root only, so the
 # composite action's folder is named too.
 version: 2
 updates:
