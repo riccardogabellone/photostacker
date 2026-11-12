@@ -38,6 +38,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # A commit of the action's `stable` branch, which Dependabot cannot move (it moves
+      # tags): move it by hand, in every workflow at once, to the commit that
+      #   gh api repos/dtolnay/rust-toolchain/commits/stable --jq .sha
+      # prints.
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: stable
@@ -67,107 +71,20 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Moved by hand: see the lint job.
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: stable
           components: clippy
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-
-      # The build inputs of each system (AGENTS.md, spec §11.1).
-      - name: System packages (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            build-essential cmake pkg-config nasm libde265-dev libegl1 zenity
-
-      - name: Where vcpkg goes (Windows)
-        id: vcpkg
-        if: runner.os == 'Windows'
-        shell: pwsh
-        # The default root of scripts/windows-heif.ps1.
-        run: Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "root=$(Join-Path $env:LOCALAPPDATA 'photostacker\vcpkg')"
-      - name: Cache vcpkg (Windows)
-        if: runner.os == 'Windows'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ steps.vcpkg.outputs.root }}
-          # The script pins the vcpkg commit and the two libraries' versions.
-          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/windows-heif.ps1') }}
-      - name: libheif and libde265 (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          # In this process, the script's output is the root alone; what it says goes to the host.
-          $root = @(& ./scripts/windows-heif.ps1)[-1]
-          if (-not (Test-Path -LiteralPath $root -PathType Container)) {
-            throw "scripts/windows-heif.ps1 gave '$root', which is not a folder"
-          }
-          Add-Content -LiteralPath $env:GITHUB_ENV -Value "VCPKG_ROOT=$root"
-
-      - name: cmake and pkg-config (macOS)
-        if: runner.os == 'macOS'
-        env:
-          HOMEBREW_NO_AUTO_UPDATE: "1"
-        run: |
-          missing=
-          command -v cmake >/dev/null 2>&1 || missing="$missing cmake"
-          command -v pkg-config >/dev/null 2>&1 || missing="$missing pkgconf"
-          if [ -n "$missing" ]; then
-            echo "Installing with Homebrew:$missing"
-            # shellcheck disable=SC2086 # one word per formula
-            brew install $missing
-          fi
-          cmake --version | sed -n 1p
-          echo "pkg-config $(pkg-config --version)"
-      - name: Cache libde265 (macOS)
-        if: runner.os == 'macOS'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/libde265
-          # The script pins libde265's release; the build is for this runner's architecture.
-          key: libde265-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/libde265.sh') }}
-      - name: libde265 (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          prefix="$RUNNER_TEMP/libde265"
-          scripts/libde265.sh "$prefix"
-          # libheif's cmake build finds the static libde265 there, and only there.
-          echo "CMAKE_PREFIX_PATH=$prefix" >>"$GITHUB_ENV"
-          echo "PKG_CONFIG_LIBDIR=$prefix/lib/pkgconfig" >>"$GITHUB_ENV"
-
-      # ONNX Runtime, which the model tests load from ORT_DYLIB_PATH (spec §8.3).
-      - name: Where ONNX Runtime goes
-        id: ort
-        run: |
-          library=$(scripts/ort.sh --where)
-          if [ -z "$library" ]; then
-            echo "::error::scripts/onnxruntime.tsv pins no ONNX Runtime build for this runner"
-            exit 1
-          fi
-          if [ "$RUNNER_OS" = Windows ]; then
-            library=$(cygpath -u "$library")
-          fi
-          # The table's library is lib/<file>, in the folder the archive unpacks to.
-          home=$(dirname "$(dirname "$library")")
-          if [ "$RUNNER_OS" = Windows ]; then
-            home=$(cygpath -w "$home")
-          fi
-          echo "home=$home" >>"$GITHUB_OUTPUT"
-      - name: Cache ONNX Runtime
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ steps.ort.outputs.home }}
-          key: onnxruntime-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/onnxruntime.tsv') }}
-      - name: ONNX Runtime
-        run: |
-          library=$(scripts/ort.sh)
-          echo "ORT_DYLIB_PATH=$library" >>"$GITHUB_ENV"
-
+      # A prebuilt nextest, for every runner here.
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: nextest@0.9.150
           fallback: none
+
+      # The system's libraries, vcpkg or libde265, and ONNX Runtime (ORT_DYLIB_PATH).
+      - uses: ./.github/actions/build-inputs
 
       # dinov2-small, which a model test runs, from PHOTOSTACKER_MODELS_DIR: downloaded by the
       # tool itself into <data folder>/models, the registry's pinned file (spec §8.1).
@@ -232,45 +149,17 @@ jobs:
       - name: Release build
         run: cargo build --release --locked -p photostacker-ui -p photostacker-cli
 
-      # The package check reads the deployment target of the executables only, which a
-      # static library compiled for a newer macOS would not change. libde265.sh checks
-      # libde265's objects; this checks libheif's, which cmake built through libheif-sys.
-      - name: libheif's objects need macOS 11.0 (macOS)
+      # libde265.sh checks libde265's objects; this checks libheif's, which cmake built
+      # through libheif-sys (scripts/macos-min.sh says why).
+      - name: libheif's objects run on macOS 11.0 (macOS)
         if: runner.os == 'macOS'
         run: |
-          target=11.0
-          archives=$(find target -path '*/build/libheif-sys-*/out/*' -name libheif.a 2>/dev/null || true)
-          if [ -z "$archives" ]; then
+          set --
+          while IFS= read -r archive; do
+            set -- "$@" "$archive"
+          done < <(find target -path '*/build/libheif-sys-*/out/*' -name libheif.a 2>/dev/null || true)
+          if [ "$#" = 0 ]; then
             echo "::error::found no libheif.a under target/*/build/libheif-sys-*/out/"
             exit 1
           fi
-          status=0
-          while IFS= read -r archive; do
-            # Each object, with LC_BUILD_VERSION's minos or LC_VERSION_MIN_MACOSX's version;
-            # a member with no load command (the symbol table) is no object.
-            report=$(otool -l "$archive" | awk '
-              function done() {
-                if (member != "" && commands) print member, (minos == "" ? "none" : minos)
-              }
-              /\(.*\):$/ { done(); member = $0; sub(/^.*\(/, "", member); sub(/\):$/, "", member); commands = 0; minos = ""; next }
-              $1 == "Load" && $2 == "command" { commands = 1 }
-              $1 == "cmd" { cmd = $2 }
-              minos == "" && cmd == "LC_BUILD_VERSION" && $1 == "minos" { minos = $2 }
-              minos == "" && cmd == "LC_VERSION_MIN_MACOSX" && $1 == "version" { minos = $2 }
-              END { done() }')
-            objects=$(printf '%s\n' "$report" | grep -c . || true)
-            wrong=$(printf '%s\n' "$report" | awk -v target="$target" '$2 != target')
-            if [ "$objects" = 0 ]; then
-              echo "::error::otool -l found no object in $archive"
-              status=1
-            elif [ -n "$wrong" ]; then
-              echo "::error::objects in $archive need another macOS than $target (object, minimum macOS):"
-              printf '%s\n' "$wrong"
-              status=1
-            else
-              echo "ok: all $objects objects in $archive need macOS $target"
-            fi
-          done <<EOF
-          $archives
-          EOF
-          exit "$status"
+          scripts/macos-min.sh 11.0 "$@"

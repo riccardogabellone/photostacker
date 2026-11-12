@@ -1,0 +1,107 @@
+name: Build inputs
+description: >-
+  What a build of the workspace needs before cargo on this runner (AGENTS.md, spec §11.1):
+  the system libraries on Linux, libheif and libde265 from vcpkg on Windows (VCPKG_ROOT),
+  a static libde265 on macOS (CMAKE_PREFIX_PATH, PKG_CONFIG_LIBDIR), and on every system
+  the pinned ONNX Runtime (ORT_DYLIB_PATH), each cached by its pin. Run it after the
+  checkout, from the repository's root.
+
+runs:
+  using: composite
+  steps:
+    - name: System packages (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+          build-essential cmake pkg-config nasm libde265-dev libegl1 zenity
+
+    - name: Where vcpkg goes (Windows)
+      id: vcpkg
+      if: runner.os == 'Windows'
+      shell: pwsh
+      # The default root of scripts/windows-heif.ps1.
+      run: Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "root=$(Join-Path $env:LOCALAPPDATA 'photostacker\vcpkg')"
+    - name: Cache vcpkg (Windows)
+      if: runner.os == 'Windows'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.vcpkg.outputs.root }}
+        # The script pins the vcpkg commit and the two libraries' versions.
+        key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/windows-heif.ps1') }}
+    - name: libheif and libde265 (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        # In this process, the script's output is the root alone; what it says goes to the host.
+        $root = @(& ./scripts/windows-heif.ps1)[-1]
+        if (-not (Test-Path -LiteralPath $root -PathType Container)) {
+          throw "scripts/windows-heif.ps1 gave '$root', which is not a folder"
+        }
+        Add-Content -LiteralPath $env:GITHUB_ENV -Value "VCPKG_ROOT=$root"
+
+    - name: cmake and pkg-config (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      env:
+        HOMEBREW_NO_AUTO_UPDATE: "1"
+      run: |
+        missing=
+        command -v cmake >/dev/null 2>&1 || missing="$missing cmake"
+        command -v pkg-config >/dev/null 2>&1 || missing="$missing pkgconf"
+        if [ -n "$missing" ]; then
+          echo "Installing with Homebrew:$missing"
+          # shellcheck disable=SC2086 # one word per formula
+          brew install $missing
+        fi
+        cmake --version | sed -n 1p
+        echo "pkg-config $(pkg-config --version)"
+    - name: Cache libde265 (macOS)
+      if: runner.os == 'macOS'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/libde265
+        # The script pins libde265's release; the build is for this runner's architecture.
+        # macos-min.sh, which it calls, does not change what it builds.
+        key: libde265-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/libde265.sh') }}
+    - name: libde265 (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        prefix="$RUNNER_TEMP/libde265"
+        scripts/libde265.sh "$prefix"
+        # libheif's cmake build finds the static libde265 there, and only there.
+        echo "CMAKE_PREFIX_PATH=$prefix" >>"$GITHUB_ENV"
+        echo "PKG_CONFIG_LIBDIR=$prefix/lib/pkgconfig" >>"$GITHUB_ENV"
+
+    # ONNX Runtime: the model tests load it from ORT_DYLIB_PATH, and scripts/package.sh puts
+    # the same build in the packages (spec §8.3).
+    - name: Where ONNX Runtime goes
+      id: ort
+      shell: bash
+      run: |
+        library=$(scripts/ort.sh --where)
+        if [ -z "$library" ]; then
+          echo "::error::scripts/onnxruntime.tsv pins no ONNX Runtime build for this runner"
+          exit 1
+        fi
+        if [ "$RUNNER_OS" = Windows ]; then
+          library=$(cygpath -u "$library")
+        fi
+        # The table's library is lib/<file>, in the folder the archive unpacks to.
+        home=$(dirname "$(dirname "$library")")
+        if [ "$RUNNER_OS" = Windows ]; then
+          home=$(cygpath -w "$home")
+        fi
+        echo "home=$home" >>"$GITHUB_OUTPUT"
+    - name: Cache ONNX Runtime
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.ort.outputs.home }}
+        key: onnxruntime-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/onnxruntime.tsv') }}
+    - name: ONNX Runtime
+      shell: bash
+      run: |
+        library=$(scripts/ort.sh)
+        echo "ORT_DYLIB_PATH=$library" >>"$GITHUB_ENV"
