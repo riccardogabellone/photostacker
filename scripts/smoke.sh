@@ -16,10 +16,14 @@
 #   .dmg            hdiutil attach, read-only, on a scratch mount point, detached on every exit
 #   -setup.exe      the NSIS installer: only checked to exist and not be empty, unless
 #                   --install: then a silent install into a scratch folder, the checks, a
-#                   silent uninstall, and the registry key the uninstaller leaves is removed.
-#                   It refuses when Photostacker is installed for this user or running: the
-#                   installer would take over the install's entry in the system's list of apps,
-#                   and both it and the uninstaller end a running Photostacker without asking.
+#                   silent uninstall, and the registry keys the uninstaller leaves are removed.
+#                   Before any package is checked, it refuses when any trace of Photostacker
+#                   is there for this user (its entry in the system's list of apps, its
+#                   registry key, its Start menu folder) or Photostacker.exe runs: the
+#                   installer would take over the entry and the Start menu shortcut, the
+#                   uninstaller would delete them, and both end a running Photostacker without
+#                   asking. So nothing the install touches was there before it, and nothing
+#                   needs putting back.
 #   .msi            only checked to exist and not be empty: installing it needs elevation
 #   -portable.zip   Expand-Archive into a scratch folder; it holds the files the installers
 #                   install
@@ -206,60 +210,50 @@ key_exists() {
     windows_command reg.exe query "$1" /reg:64 >/dev/null 2>&1
 }
 
-# Before a real NSIS install: refuses when Photostacker is installed for this user (the
-# install would take over its uninstall entry, and the uninstall would remove it) or running
-# (the installer and the uninstaller end it without asking).
+# Before a real NSIS install, and before any package is checked: refuses when any trace of
+# Photostacker is there for this user, or it runs. The install would take over the
+# uninstall entry, the product key and the Start menu shortcut, the uninstall would delete
+# them, and the installer and the uninstaller end a running Photostacker without asking.
+# Also notes whether the publisher's key is there, so nsis_forget removes it only if the
+# install made it.
 nsis_precheck() {
     local tasks
     nsis_keys
-    if key_exists "$uninstall_key"; then
-        fail "--install: expected Photostacker not to be installed for this user, found $uninstall_key; the silent install would take over its entry and the uninstall would remove it: uninstall it first, or check the installer on a throwaway machine"
-    fi
-    tasks=$(windows_command tasklist.exe /FI "IMAGENAME eq Photostacker.exe" /FO CSV /NH 2>/dev/null | tr -d '\r') ||
-        fail "--install: tasklist.exe could not list the running programs"
-    case "$tasks" in
-        *'"Photostacker.exe"'*) fail "--install: expected Photostacker.exe not to be running, found it running; the silent installer and uninstaller would end it without asking: close it first" ;;
-    esac
-    ok "--install: Photostacker is not installed for this user ($uninstall_key does not exist), and Photostacker.exe is not running"
-}
-
-# Before a real NSIS install: keeps a copy of the product key if it is there already (left
-# by an earlier install), and notes whether the publisher's key is, so nsis_forget can put
-# the registry back as it was.
-nsis_remember() {
-    product_key_copy=
-    if key_exists "$product_key"; then
-        product_key_copy="$scratch/product-key.reg"
-        windows_command reg.exe export "$product_key" "$(native "$product_key_copy")" /y /reg:64 >/dev/null ||
-            fail "--install: expected reg.exe to export $product_key, found it failed"
-    fi
-    publisher_key_existed=0
-    if key_exists "$publisher_key"; then
-        publisher_key_existed=1
-    fi
     # A silent install still makes the Start menu folder (only the desktop shortcut obeys
     # /NS); the uninstaller removes it.
     if [ -z "${APPDATA:-}" ]; then
         fail "--install: expected APPDATA to name this user's roaming folder, found it unset"
     fi
     start_menu="$(cygpath -u "$APPDATA")/Microsoft/Windows/Start Menu/Programs/Photostacker"
-    start_menu_existed=0
-    if [ -e "$start_menu" ]; then
-        start_menu_existed=1
+    if key_exists "$uninstall_key"; then
+        fail "--install: expected no trace of Photostacker for this user, found $uninstall_key (Photostacker is installed); the silent install would take it over and the uninstall would remove it: uninstall it first, or check the installer on a throwaway machine"
     fi
-    nsis_registry=1
+    if key_exists "$product_key"; then
+        fail "--install: expected no trace of Photostacker for this user, found $product_key (left by an earlier install); the silent install would take it over and this script would remove it: delete it first, or check the installer on a throwaway machine"
+    fi
+    if [ -e "$start_menu" ]; then
+        fail "--install: expected no trace of Photostacker for this user, found the Start menu folder $(native "$start_menu"); the silent install would overwrite its shortcut and the uninstall would remove it: delete it first, or check the installer on a throwaway machine"
+    fi
+    tasks=$(windows_command tasklist.exe /FI "IMAGENAME eq Photostacker.exe" /FO CSV /NH 2>/dev/null | tr -d '\r') ||
+        fail "--install: tasklist.exe could not list the running programs"
+    case "$tasks" in
+        *'"Photostacker.exe"'*) fail "--install: expected Photostacker.exe not to be running, found it running; the silent installer and uninstaller would end it without asking: close it first" ;;
+    esac
+    publisher_key_existed=0
+    if key_exists "$publisher_key"; then
+        publisher_key_existed=1
+    fi
+    ok "--install: no trace of Photostacker for this user (no $uninstall_key, no $product_key, no Start menu folder $(native "$start_menu")), and Photostacker.exe is not running"
 }
 
-# After the NSIS uninstall: removes the product key the uninstaller leaves, puts back the
-# one that was there before, if any, and removes the publisher's key if the install made it.
-# Returns non-zero when reg.exe fails (it also runs from the EXIT trap, so it does not exit).
+# After the NSIS uninstall: removes the product key the uninstaller leaves, which the
+# install made, and the publisher's key if the install made that too. Returns non-zero when
+# reg.exe fails (it also runs from the EXIT trap, so it does not exit).
 nsis_forget() {
     if key_exists "$product_key"; then
         windows_command reg.exe delete "$product_key" /f /reg:64 >/dev/null || return 1
     fi
-    if [ -n "$product_key_copy" ]; then
-        windows_command reg.exe import "$(native "$product_key_copy")" /reg:64 >/dev/null 2>&1 || return 1
-    elif [ "$publisher_key_existed" = 0 ] && key_exists "$publisher_key"; then
+    if [ "$publisher_key_existed" = 0 ] && key_exists "$publisher_key"; then
         windows_command reg.exe delete "$publisher_key" /f /reg:64 >/dev/null || return 1
     fi
     nsis_registry=0
@@ -498,6 +492,26 @@ check_runs() {
     ok "runs: a dry run over $fixtures read every HEIC file there, with no error"
 }
 
+# With --install and an NSIS installer to install: the checks that refuse come before any
+# package is opened.
+nsis_root="$scratch/nsis"
+if [ "$os" = windows ] && [ "$install" = 1 ]; then
+    for package in "${packages[@]}"; do
+        case "$package" in
+            *-setup.exe)
+                # NSIS takes /D= last and unquoted, spaces and all; but MSYS quotes an
+                # argument that has a space, and the installer then does not get the folder
+                # as given. So a folder with a space is refused.
+                case "$(native "$nsis_root")" in
+                    *' '*) fail "--install: expected an install folder without spaces, found $(native "$nsis_root"): MSYS would quote the /D= argument, and the installer would not get the folder as given" ;;
+                esac
+                nsis_precheck
+                break
+                ;;
+        esac
+    done
+fi
+
 for package in "${packages[@]}"; do
     name=$(basename "$package")
     echo "== $name"
@@ -562,14 +576,8 @@ for package in "${packages[@]}"; do
                 ok "$name exists and is not empty; it is not installed here: only --install installs it, which changes this machine (the portable zip holds the same files and gets the full check)"
                 continue
             fi
-            root="$scratch/nsis"
-            # NSIS takes /D= last and unquoted, spaces and all; but MSYS wraps an argument
-            # that has a space in quotes, and NSIS would read the quotes as part of the path.
-            case "$(native "$root")" in
-                *' '*) fail "$name: expected an install folder without spaces, found $(native "$root"): MSYS would quote the /D= argument, and NSIS would take the quotes as part of the folder" ;;
-            esac
-            nsis_precheck
-            nsis_remember
+            root=$nsis_root
+            nsis_registry=1
             nsis_dir=$root
             # /NS: no desktop shortcut. /D= must come last, unquoted.
             windows_command "$package" /S /NS "/D=$(native "$root")" ||
@@ -635,11 +643,11 @@ for package in "${packages[@]}"; do
         if key_exists "$uninstall_key"; then
             fail "$name: expected the uninstaller to remove $uninstall_key, found it is still there"
         fi
-        if [ "$start_menu_existed" = 0 ] && [ -e "$start_menu" ]; then
-            fail "$name: expected the uninstaller to remove the Start menu folder $start_menu, found it is still there"
+        if [ -e "$start_menu" ]; then
+            fail "$name: expected the uninstaller to remove the Start menu folder $(native "$start_menu"), found it is still there"
         fi
-        nsis_forget || fail "$name: expected reg.exe to remove $product_key, which the uninstaller leaves (and put back what was there before), found it failed"
-        ok "uninstalled silently; $uninstall_key is gone, and $product_key is as it was before the install"
+        nsis_forget || fail "$name: expected reg.exe to remove $product_key, which the uninstaller leaves, found it failed"
+        ok "uninstalled silently; $uninstall_key and the Start menu folder are gone, and $product_key, which the uninstaller leaves, is removed"
     fi
     if [ "$deb_installed" = 1 ]; then
         $sudo apt-get remove -y photostacker >/dev/null || fail "$name: expected apt-get to remove it, found it failed"
