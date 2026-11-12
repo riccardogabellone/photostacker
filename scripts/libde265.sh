@@ -28,14 +28,15 @@
 # found first, so after these variables are set, changed or removed, run
 # `cargo clean -p libheif-sys` and `cargo clean --release -p libheif-sys` before the build.
 #
-# A run that finds libde265.a and libde265.pc of this version in <prefix> does nothing.
+# A run that finds libde265.a and libde265.pc of this version in <prefix> builds nothing.
 # cmake installs the .pc file last, so an interrupted install has none, and the next run
 # builds again. A <prefix> that holds another version is refused.
 #
-# On macOS it then checks its own work: every object in libde265.a runs on the deployment
-# target (scripts/macos-min.sh), none needs the CPU detection of clang's runtime library,
-# which the app's link does not have, and the .pc file names no -lstdc++, which macOS does
-# not have (libde265's template names -lc++ where the C++ library is libc++, as on macOS).
+# On macOS it then checks the library, built by this run or by an earlier one: every object
+# in libde265.a runs on the deployment target (scripts/macos-min.sh), none needs the CPU
+# detection of clang's runtime library, which the app's link does not have, and the .pc
+# file names no -lstdc++, which macOS does not have (libde265's template names -lc++ where
+# the C++ library is libc++, as on macOS).
 #
 # Needs curl, cmake, a C and C++ compiler, and the network; on macOS also otool and nm (the
 # Xcode command line tools), and macos-min.sh beside this script. On Linux the macOS checks
@@ -77,19 +78,6 @@ pc_version() {
     sed -n 's/^Version: *//p' "$1" | sed -n 1p
 }
 
-if [ -f "$library" ] && [ -f "$pc" ]; then
-    installed=$(pc_version "$pc")
-    if [ "$installed" = "$version" ]; then
-        echo "libde265 $version is already installed in $prefix" >&2
-        exit 0
-    fi
-    fail "$prefix holds libde265 ${installed:-of no known version}, not $version: delete it, or choose another prefix"
-fi
-
-for tool in curl cmake; do
-    command -v "$tool" >/dev/null 2>&1 || fail "$tool is not on the PATH, and it is needed to build libde265"
-done
-
 target=
 if [ "$os" = macos ]; then
     for tool in otool nm; do
@@ -98,6 +86,45 @@ if [ "$os" = macos ]; then
     done
     target=${MACOSX_DEPLOYMENT_TARGET:-11.0}
 fi
+
+# macOS: the checks of the library in <prefix>. $1 ends each failure: what to do about a
+# library that an earlier run built, nothing for the one this run built.
+check_macos() {
+    local hint=$1 undefined cpu_detection
+    "$scripts/macos-min.sh" "$target" "$library" >&2 ||
+        fail "$library did not pass scripts/macos-min.sh for macOS $target (the line above says why)$hint"
+    # The symbols behind __builtin_cpu_supports and __builtin_cpu_init on x86 (the build's
+    # options, below, say why no object may need them): a later release that asks for them
+    # elsewhere fails here, not in the app's link. nm writes each name last on its line,
+    # after a `U` (GNU's) or alone (Apple's), with two underscores before `cpu` in ELF and
+    # three in Mach-O.
+    undefined=$(nm -u "$library") || fail "nm could not read $library$hint"
+    cpu_detection=$(printf '%s\n' "$undefined" | sed 's/.*[[:space:]]//' | grep -E '^_{2,3}cpu_(model|indicator_init|features2)$' | sort -u | tr '\n' ' ' || true)
+    if [ -n "$cpu_detection" ]; then
+        fail "$library needs the CPU detection of clang's runtime library, which the app's link does not have: ${cpu_detection% }$hint"
+    fi
+    echo "ok: no object in $library needs the CPU detection of clang's runtime library" >&2
+    if grep -q -- '-lstdc++' "$pc"; then
+        fail "$pc names -lstdc++, which macOS does not have, so the app's link would fail: $(grep '^Libs.private:' "$pc")$hint"
+    fi
+    echo "ok: $pc names no -lstdc++: $(grep '^Libs.private:' "$pc")" >&2
+}
+
+if [ -f "$library" ] && [ -f "$pc" ]; then
+    installed=$(pc_version "$pc")
+    if [ "$installed" = "$version" ]; then
+        echo "libde265 $version is already installed in $prefix" >&2
+        if [ "$os" = macos ]; then
+            check_macos "; an earlier run built this library: delete $prefix and run this script again"
+        fi
+        exit 0
+    fi
+    fail "$prefix holds libde265 ${installed:-of no known version}, not $version: delete it, or choose another prefix"
+fi
+
+for tool in curl cmake; do
+    command -v "$tool" >/dev/null 2>&1 || fail "$tool is not on the PATH, and it is needed to build libde265"
+done
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/libde265.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
@@ -165,18 +192,6 @@ if [ "$(pc_version "$pc")" != "$version" ]; then
 fi
 
 if [ "$os" = macos ]; then
-    "$scripts/macos-min.sh" "$target" "$library" >&2
-    # The symbols behind __builtin_cpu_supports and __builtin_cpu_init (the options above):
-    # a later release that asks for them elsewhere fails here, not in the app's link.
-    undefined=$(nm -u "$library" 2>/dev/null) || fail "nm cannot read $library"
-    cpu_detection=$(printf '%s\n' "$undefined" | grep -E '_cpu_(model|indicator_init|features2)$' | sed 's/.*[[:space:]]//' | sort -u | tr '\n' ' ' || true)
-    if [ -n "$cpu_detection" ]; then
-        fail "$library needs the CPU detection of clang's runtime library, which the app's link does not have: $cpu_detection"
-    fi
-    echo "ok: no object in $library needs the CPU detection of clang's runtime library" >&2
-    if grep -q -- '-lstdc++' "$pc"; then
-        fail "$pc names -lstdc++, which macOS does not have, so the app's link would fail: $(grep '^Libs.private:' "$pc")"
-    fi
-    echo "ok: $pc names no -lstdc++: $(grep '^Libs.private:' "$pc")" >&2
+    check_macos ""
 fi
 echo "Installed libde265 $version in $prefix" >&2
