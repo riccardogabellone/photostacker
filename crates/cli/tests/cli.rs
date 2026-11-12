@@ -303,8 +303,9 @@ fn unreadable_input_root_exits_1() {
 }
 
 /// JSON needs UTF-8 paths, so a non-UTF-8 input folder is a
-/// runtime failure whose message names the problem.
-#[cfg(unix)]
+/// runtime failure whose message names the problem. Not on macOS, whose
+/// file system (APFS) refuses to create a name that is not valid UTF-8.
+#[cfg(all(unix, not(target_os = "macos")))]
 #[test]
 fn non_utf8_path_exits_1_with_a_clear_message() {
     use std::ffi::OsStr;

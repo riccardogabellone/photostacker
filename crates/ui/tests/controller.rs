@@ -1231,8 +1231,9 @@ fn answers_out_of_the_forms_sight_land_on_their_own_form_or_job() {
     assert!(controller.take_submitted().is_empty());
 }
 
-/// A folder in `root` whose name is not valid UTF-8.
-#[cfg(unix)]
+/// A folder in `root` whose name is not valid UTF-8. Not on macOS, whose file system
+/// (APFS) refuses to create such a name: the tests that need one are left out there.
+#[cfg(all(unix, not(target_os = "macos")))]
 fn not_unicode_folder(root: &Path) -> PathBuf {
     use std::os::unix::ffi::OsStrExt;
     let folder = root.join(std::ffi::OsStr::from_bytes(b"caf\xe9"));
@@ -1241,7 +1242,7 @@ fn not_unicode_folder(root: &Path) -> PathBuf {
 }
 
 /// The warning about `folder`, whose name is not valid Unicode.
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "macos")))]
 fn not_unicode_warning(folder: &Path) -> Notice {
     Notice {
         level: NoticeLevel::Warning,
@@ -1252,7 +1253,7 @@ fn not_unicode_warning(folder: &Path) -> Notice {
     }
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "macos")))]
 #[test]
 fn dropping_a_folder_whose_name_is_not_unicode_is_refused_plainly() {
     let (_data, dirs) = data_dir();
@@ -1277,7 +1278,7 @@ fn dropping_a_folder_whose_name_is_not_unicode_is_refused_plainly() {
     assert_eq!(controller.take_notices(), [not_unicode_warning(&folder)]);
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "macos")))]
 #[test]
 fn browsing_to_a_folder_whose_name_is_not_unicode_is_refused_plainly() {
     let (_data, dirs) = data_dir();

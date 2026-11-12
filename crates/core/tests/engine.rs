@@ -471,7 +471,9 @@ fn invalid_config_is_rejected_at_submit() {
     assert_eq!(events.try_recv(), Err(TryRecvError::Empty));
 }
 
-#[cfg(unix)]
+/// Not on macOS, whose file system (APFS) refuses to create a name that is not
+/// valid UTF-8.
+#[cfg(all(unix, not(target_os = "macos")))]
 #[test]
 fn non_utf8_folder_is_refused_at_submit() {
     use std::ffi::OsStr;
