@@ -2571,7 +2571,9 @@ impl CrashedWrite {
         CrashedWrite::of(dirs, input, config)
     }
 
-    /// A crashed write whose job writes into `output_dir`.
+    /// A crashed write whose job writes into `output_dir`. Only a test that
+    /// takes a folder's write permission away uses it, so only on Unix.
+    #[cfg(unix)]
     fn writing_into(dirs: &AppDirs, output_dir: PathBuf) -> CrashedWrite {
         let input = review_folder();
         let mut config = JobConfig::new(input.path().to_path_buf());
