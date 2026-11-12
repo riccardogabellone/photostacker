@@ -1,0 +1,13 @@
+# The actions the workflows use, pinned to commits: one pull request a month moves them
+# all, with the version comments beside the commits.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci

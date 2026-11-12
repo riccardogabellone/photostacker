@@ -83,7 +83,7 @@ Each check prints one line; the first that fails says what it expected and what 
 
 ## Releasing
 
-The release workflow is not written yet. The steps it is to take part in:
+The release workflow is [.github/workflows/release.yml](../.github/workflows/release.yml); a pull request that touches the packaging runs it too, without a release. A release:
 
 1. Bump `version` in `[workspace.package]` of the root `Cargo.toml` in a pull request, and merge it.
 2. Tag the merge commit on `main` as `vX.Y.Z`, the new version, and push the tag.

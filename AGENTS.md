@@ -105,4 +105,4 @@ node scripts/standins/standins.mjs --photocraft <folder>/photocraft-cli.exe  # t
 - One change per commit and per pull request.
 - The subject line is a conventional commit (`feat(core): …`, `fix(ui): …`, `docs: …`). The body is a short list of bullets: what changed and why, as few as tell the story. No trailers: no `Co-Authored-By`, no tool or session lines.
 - Run `just check` before every commit. Update `docs/design.md` and the README when behaviour changes, and `crates/ui/DESIGN.md` when the UI does.
-- The version is the workspace's, in [Cargo.toml](Cargo.toml). A release is a tag `vX.Y.Z` on `main`. The CI and release workflows are not written yet.
+- The version is the workspace's, in [Cargo.toml](Cargo.toml). A release is a tag `vX.Y.Z` on `main`. [.github/workflows/ci.yml](.github/workflows/ci.yml) checks every pull request and every push to `main` on Linux, Windows and macOS; [.github/workflows/release.yml](.github/workflows/release.yml) builds and checks the packages of a tag and drafts its release ([packaging/README.md](packaging/README.md)).
