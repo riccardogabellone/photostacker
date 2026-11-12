@@ -274,12 +274,12 @@ mod tests {
         assert!(!RAW_EXTENSIONS.contains(&"x3f"));
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_raw_truncated_after_it_is_opened_cannot_fault() {
         // A card pulled during a scan: the file shrinks under rawler's source.
-        // Reading a mapped page past the new end would raise SIGBUS and end
-        // the test process; bytes on the heap stay as they were read.
+        // Reading a mapped page past the new end would raise SIGBUS on Unix
+        // and end the test process (Windows refuses to truncate a mapped
+        // file at all); bytes on the heap stay as they were read.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("unknown.nef");
         let original = photostacker_testkit::tiff_raw_with_jpegs(&[(160, 120), (1024, 683)]);

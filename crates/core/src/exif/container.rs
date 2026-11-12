@@ -503,11 +503,11 @@ mod tests {
         jpeg_exif(Cursor::new(data))
     }
 
-    #[cfg(unix)]
     #[test]
     fn exif_read_survives_the_file_being_truncated() {
         // A card pulled during a scan: the file shrinks after it was read.
-        // A mapped page past the new end would raise SIGBUS when read.
+        // A mapped page past the new end would raise SIGBUS when read on
+        // Unix; Windows refuses to truncate a mapped file at all.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("x.tif");
         let tiff = photostacker_testkit::TiffSpec {

@@ -881,11 +881,11 @@ fn stem_with_backslash_or_colon_is_written_on_unix() {
 
 /// A group fails (its output name is too long for the file system), the
 /// next is written; progress still reaches its total.
-#[cfg(unix)]
 #[test]
 fn failed_group_does_not_stop_the_next() {
     let dir = tempfile::tempdir().unwrap();
-    // 254 bytes, within the 255-byte name limit; `<stem>_2.psd.partial` is not.
+    // 254 characters, within the 255 a name may have (bytes on Unix, UTF-16
+    // units on NTFS); `<stem>_2.psd.partial` is not.
     let long = format!("{}.jpg", "x".repeat(250));
     let paths: Vec<PathBuf> = [long.as_str(), "b.jpg", "c.jpg", "d.jpg"]
         .iter()
@@ -932,11 +932,11 @@ fn failed_group_does_not_stop_the_next() {
 /// A stack that fails after some of its members ticked has
 /// only the others ticked by `write_all`, so every member ticks exactly once
 /// and progress still reaches its total.
-#[cfg(unix)]
 #[test]
 fn stack_failing_mid_way_ticks_each_member_once() {
     let dir = tempfile::tempdir().unwrap();
-    // 254 bytes, within the 255-byte name limit; `<stem>_2.psd` is not.
+    // 254 characters, within the 255 a name may have (bytes on Unix, UTF-16
+    // units on NTFS); `<stem>_2.psd` is not.
     let long_x = format!("{}.jpg", "x".repeat(250));
     let long_y = format!("{}.jpg", "y".repeat(250));
     let names = [
