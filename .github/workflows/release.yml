@@ -75,7 +75,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: stable
+      # A release is built from pinned downloads alone: on a tag, no cache is restored here
+      # or in the build inputs.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         with:
           # cargo does not build libheif again when only its toolchain file changes.
           key: libheif-${{ hashFiles('packaging/cmake/libheif.cmake') }}
@@ -105,8 +108,11 @@ jobs:
           cargo install cargo-about --version 0.9.3 --locked --features cli
           cargo install cargo-packager --version 0.11.8 --locked
 
-      # The system's libraries, vcpkg or libde265, and ONNX Runtime, as in the CI.
+      # The system's libraries, vcpkg or libde265, and ONNX Runtime, as in the CI; on a tag
+      # built from their pins, without the caches.
       - uses: ./.github/actions/build-inputs
+        with:
+          cache: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
       - name: Packages
         run: scripts/package.sh "$FORMATS"
