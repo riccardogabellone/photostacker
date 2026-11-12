@@ -42,9 +42,9 @@
 #   macOS      the minimum macOS of every Mach-O file: 11.0, but 14.0 for ONNX Runtime on
 #              Apple silicon
 #   signature  macOS: the app is sealed by a valid ad-hoc signature, nested code included,
-#              and both executables carry the entitlement that lets them load ONNX
-#              Runtime's library under the hardened runtime (crates/ui/Cargo.toml)
-#   runs`photostacker-cli info` names the version in the package's name, libde265,
+#              with the hardened runtime, and both executables carry the entitlement that
+#              lets them load ONNX Runtime's library under it (crates/ui/Cargo.toml)
+#   runs       `photostacker-cli info` names the version in the package's name, libde265,
 #              and the ONNX Runtime of scripts/onnxruntime.tsv for this system, loaded from
 #              the package; `photostacker-cli run crates/core/tests/fixtures/heic --dry-run`
 #              succeeds, and its plan lists every HEIC file there, with no error
@@ -54,8 +54,8 @@
 # in the scratch folder, which is removed at the end.
 #
 # Needs: Linux: dpkg, objdump (binutils); apt-get for --install. macOS: hdiutil,
-# otool, file, codesign. Windows (Git Bash): cygpath, PowerShell for the zip and the MSI, msiexec.exe,
-# and reg.exe and tasklist.exe for --install.
+# otool, file, codesign. Windows (Git Bash): cygpath, PowerShell for the zip and the MSI,
+# msiexec.exe, and reg.exe and tasklist.exe for --install.
 #
 # macOS has bash 3.2 and BSD tools: no associative arrays, no mapfile, no readlink -f.
 set -euo pipefail
@@ -431,28 +431,41 @@ EOF
 }
 
 # macOS: the app is sealed by an ad-hoc signature, which crates/ui/Cargo.toml asks the
-# packager for (without it nothing seals the app, and the linker's own signature on the
-# Apple-silicon executables does not pass Gatekeeper, by Apple's release notes). The packager
-# signs with the hardened runtime, under which macOS loads only libraries signed by Apple or
-# by the app's own team, and an ad-hoc signature has no team: so each executable must carry
+# packager for. Without it nothing seals the app, and the Apple-silicon executables carry
+# only the linker's own signature, which codesign also calls ad hoc: so the flags must not
+# say linker-signed, and the resources must be sealed. The packager signs with the hardened
+# runtime (the flag `runtime`), under which macOS loads only libraries signed by Apple or by
+# the app's own team, and an ad-hoc signature has no team: so each executable must carry
 # the entitlement of packaging/macos/entitlements.plist, or ONNX Runtime's library would
 # not load (the runs below load it with photostacker-cli). codesign describes a signature
 # on stderr, and the entitlements on stdout: as text on a recent macOS, as a binary blob
 # with the property list in it on an old one, hence the tr.
 check_signature_macos() {
     local entitlement=com.apple.security.cs.disable-library-validation
-    local name found
-    command -v codesign >/dev/null 2>&1 ||
-        fail "signature: codesign (the Xcode command line tools) is needed to read the app's signature"
+    local name found flags
+    command -v codesign >/dev/null 2>&1 || fail "signature: codesign is needed to read the app's signature"
     found=$(codesign --verify --deep --strict "$root" 2>&1) ||
         fail "signature: expected a valid signature that seals $root, found: ${found:-codesign failed without a word}"
-    found=$(codesign -dv "$root" 2>&1) ||
+    found=$(codesign -d --verbose=4 "$root" 2>&1) ||
         fail "signature: expected codesign to describe the signature of $root, found: ${found:-it failed without a word}"
+    # As in `CodeDirectory v=20500 size=1234 flags=0x10002(adhoc,runtime) hashes=...`.
+    flags=$(printf '%s\n' "$found" | sed -n 's/^CodeDirectory .*flags=0x[0-9a-fA-F]*(\([^)]*\)).*/\1/p')
     case "$found" in
         *Signature=adhoc*) ;;
         *) fail "signature: expected an ad-hoc signature on $root, found: $(printf '%s\n' "$found" | grep -E '^(Signature|Authority|TeamIdentifier)' | tr '\n' ' ')" ;;
     esac
-    ok "signature: the app is sealed by a valid ad-hoc signature, nested code included"
+    case ",$flags," in
+        *,linker-signed,*) fail "signature: expected the packager's signature on $root, found only the linker's (flags $flags)" ;;
+    esac
+    case ",$flags," in
+        *,runtime,*) ;;
+        *) fail "signature: expected the hardened runtime among the signature's flags, as cargo-packager 0.11.8 signs, found ${flags:-no flags}: without it the entitlement is not needed, and crates/ui/Cargo.toml and the docs say otherwise" ;;
+    esac
+    case "$found" in
+        *"Sealed Resources version=2"*) ;;
+        *) fail "signature: expected the app's resources sealed (Sealed Resources version=2), found: $(printf '%s\n' "$found" | grep -E '^Sealed Resources' | tr '\n' ' ')" ;;
+    esac
+    ok "signature: the app is sealed by a valid ad-hoc signature, nested code included (flags $flags)"
     for name in Photostacker photostacker-cli; do
         found=$(codesign -d --entitlements - "$bin_dir/$name" 2>/dev/null | tr -d '\0') ||
             fail "signature: expected codesign to read the entitlements of $bin_dir/$name, found it failed"
