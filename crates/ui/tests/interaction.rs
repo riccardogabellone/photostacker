@@ -3860,13 +3860,15 @@ fn run_until_downloading(harness: &mut Harness<'static, App>) {
     harness.step();
 }
 
-/// Draws frames until the default model is installed, and its row says so.
+/// Draws frames until the default model is installed and idle, and its row says so. The
+/// model's file is in place a moment before the engine ends the download or the import: a
+/// read of the models made in between shows the model installed and still busy, and its
+/// row then shows the download, not `Delete`.
 fn run_until_installed(harness: &mut Harness<'static, App>) {
     run_until(harness, "the model installed", |app| {
-        app.controller()
-            .models()
-            .iter()
-            .any(|view| view.spec.id == "dinov2-small" && view.installed)
+        app.controller().models().iter().any(|view| {
+            view.spec.id == "dinov2-small" && view.installed && view.activity == ModelActivity::Idle
+        })
     });
     harness.step();
 }
