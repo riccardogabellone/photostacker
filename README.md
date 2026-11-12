@@ -53,7 +53,9 @@ SmartScreen may say that it protected your PC from an unrecognised app: choose "
 To see which Mac you have, choose About This Mac in the Apple menu: it names a "Chip" (Apple silicon) or a "Processor" (Intel).
 
 1. Open the disk image, `Photostacker_<version>_aarch64.dmg` for Apple silicon or `Photostacker_<version>_x64.dmg` for Intel, and drag Photostacker into Applications.
-2. The first start says the app is damaged or from an unidentified developer, because it is not signed. Either run `xattr -dr com.apple.quarantine /Applications/Photostacker.app` in Terminal, or try to open the app once, then choose "Open Anyway" in System Settings, Privacy & Security (on macOS 11 and 12: System Preferences, Security & Privacy, General).
+2. The app is not signed, so macOS stops its first start with one of two messages, and each has its own remedy:
+   - The app "is damaged and can't be opened": this message offers no "Open Anyway". Run `xattr -dr com.apple.quarantine /Applications/Photostacker.app` in Terminal, then open the app again.
+   - The app "cannot be opened because the developer cannot be verified" (or Apple "could not verify" it): open the app once, then choose "Open Anyway" in System Settings, Privacy & Security (on macOS 11 and 12: System Preferences, Security & Privacy, General). The `xattr` command above works here too.
 
 The command-line tool is inside the app: `/Applications/Photostacker.app/Contents/MacOS/photostacker-cli`.
 

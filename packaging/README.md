@@ -99,7 +99,7 @@ The AppImage tooling looks for the desktop entry under the main binary's name, s
 
 ## Not signed
 
-The packages are not code-signed, so on macOS and Windows the first start asks for one more step: the README's [Installing](../README.md#installing) gives it for each system. Signing needs an Apple Developer ID (with notarisation) and a Windows code-signing certificate; cargo-packager has `macos.signing-identity` and `windows.sign-command` for them.
+The packages are not code-signed, so on macOS and Windows the first start asks for one more step: the README's [Installing](../README.md#installing) gives it for each system, and on macOS for each of the two messages the system may show (the `xattr` command when it says the app is damaged, "Open Anyway" when it says the developer cannot be verified). Signing needs an Apple Developer ID (with notarisation) and a Windows code-signing certificate; cargo-packager has `macos.signing-identity` and `windows.sign-command` for them.
 
 ## The AppImage and FUSE
 
