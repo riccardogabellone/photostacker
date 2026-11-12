@@ -23,12 +23,12 @@
 # cmake installs the .pc file last, so an interrupted install has none, and the next run
 # builds again. A <prefix> that holds another version is refused.
 #
-# On macOS it then checks its own work: every object in libde265.a was compiled for the
-# deployment target (otool -l), and the .pc file names no -lstdc++, which macOS does not
+# On macOS it then checks its own work: every object in libde265.a runs on the deployment
+# target (scripts/macos-min.sh), and the .pc file names no -lstdc++, which macOS does not
 # have (libde265's template names -lc++ where the C++ library is libc++, as on macOS).
 #
 # Needs curl, cmake, a C and C++ compiler, and the network; on macOS also otool (the
-# Xcode command line tools). It also runs on Linux, where only the macOS checks are left
+# Xcode command line tools), and macos-min.sh beside this script. It also runs on Linux, where only the macOS checks are left
 # out. bash 3.2 (macOS): no associative arrays, no mapfile, no ${var,,}.
 set -euo pipefail
 
@@ -52,6 +52,9 @@ case "$1" in
 esac
 library="$prefix/lib/libde265.a"
 pc="$prefix/lib/pkgconfig/libde265.pc"
+# This script's folder, which holds macos-min.sh. CDPATH is cleared: with it exported, cd
+# prints the folder it changes to, which would end up in the path.
+scripts=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 
 case "$(uname -s)" in
     Darwin) os=macos ;;
@@ -82,11 +85,6 @@ if [ "$os" = macos ]; then
     command -v otool >/dev/null 2>&1 ||
         fail "otool is not on the PATH, and it checks the build: install the Xcode command line tools (xcode-select --install)"
     target=${MACOSX_DEPLOYMENT_TARGET:-11.0}
-    # otool writes a version as major.minor.
-    case "$target" in
-        *.*) ;;
-        *) target="$target.0" ;;
-    esac
 fi
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/libde265.XXXXXX")
@@ -148,29 +146,7 @@ if [ "$(pc_version "$pc")" != "$version" ]; then
 fi
 
 if [ "$os" = macos ]; then
-    # Each object of the archive, with the oldest macOS it runs on: LC_BUILD_VERSION's
-    # minos, or LC_VERSION_MIN_MACOSX's version. otool -l heads each member with a line
-    # "<archive>(<member>):"; a member with no load command (the symbol table) is no object.
-    report=$(otool -l "$library" | awk '
-        function done() {
-            if (member != "" && commands) print member, (minos == "" ? "none" : minos)
-        }
-        /\(.*\):$/ { done(); member = $0; sub(/^.*\(/, "", member); sub(/\):$/, "", member); commands = 0; minos = ""; next }
-        $1 == "Load" && $2 == "command" { commands = 1 }
-        $1 == "cmd" { cmd = $2 }
-        minos == "" && cmd == "LC_BUILD_VERSION" && $1 == "minos" { minos = $2 }
-        minos == "" && cmd == "LC_VERSION_MIN_MACOSX" && $1 == "version" { minos = $2 }
-        END { done() }') || fail "otool -l could not read $library"
-    objects=$(printf '%s\n' "$report" | grep -c . || true)
-    if [ "$objects" = 0 ]; then
-        fail "otool -l found no object in $library"
-    fi
-    wrong=$(printf '%s\n' "$report" | awk -v target="$target" '$2 != target')
-    if [ -n "$wrong" ]; then
-        fail "expected every object in $library to need macOS $target, found these that do not (object, minimum macOS):
-$wrong"
-    fi
-    echo "ok: all $objects objects in $library need macOS $target" >&2
+    "$scripts/macos-min.sh" "$target" "$library" >&2
     if grep -q -- '-lstdc++' "$pc"; then
         fail "$pc names -lstdc++, which macOS does not have, so the app's link would fail: $(grep '^Libs.private:' "$pc")"
     fi
