@@ -357,7 +357,7 @@ fn canonical_or_as_is(path: &Path) -> PathBuf {
 /// Why a scan could not run: the input folder itself could not be read.
 #[derive(Debug, thiserror::Error)]
 pub enum DiscoverError {
-    #[error("cannot read {}", path.display())]
+    #[error("cannot read {}", crate::fsio::display_path(path))]
     Io { path: PathBuf, source: io::Error },
 }
 
@@ -768,15 +768,17 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
     #[test]
     fn symlinked_dirs_are_not_followed() {
         let dir = tempfile::tempdir().unwrap();
         touch(dir.path(), "sub/d.jpg");
         // A cycle: following it would never end.
         let sub = dir.path().join("sub");
-        std::os::unix::fs::symlink(dir.path(), sub.join("loop")).unwrap();
-        std::os::unix::fs::symlink(dir.path(), sub.join("loop.jpg")).unwrap();
+        for name in ["loop", "loop.jpg"] {
+            if !photostacker_testkit::symlink_dir(dir.path(), &sub.join(name)) {
+                return;
+            }
+        }
         let files = scan(dir.path(), true, &[]);
         assert_eq!(rel_paths(dir.path(), &files), [native("sub/d.jpg")]);
     }

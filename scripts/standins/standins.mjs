@@ -476,7 +476,7 @@ function report(opts, samples) {
 }
 
 const opts = options();
-if (!existsSync(opts.samples)) throw new Error(`no samples in ${opts.samples}: run \`just ps-samples\` in WSL first`);
+if (!existsSync(opts.samples)) throw new Error(`no samples in ${opts.samples}: run \`just ps-samples\` first (docs/photoshop-checks.md)`);
 mkdirSync(opts.out, { recursive: true });
 const samples = samplesIn(opts.samples);
 if (!opts.report) {

@@ -1,7 +1,9 @@
 //! File-system primitives of the writers: the output-folder check, the plan
 //! write that may replace, the no-clobber persistence of a finished file,
-//! and the folder sync after either (spec §2 anti-goals, §5.6).
+//! and the folder sync after either (spec §2 anti-goals, §5.6). Also how a
+//! path reads for the user, in the app and the CLI alike ([`display_path`]).
 
+use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
@@ -31,7 +33,7 @@ fn write_replace_with(path: &Path, bytes: &[u8], sync: SyncDir) -> io::Result<()
     if file_name(path).is_none() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("{} does not name a file", path.display()),
+            format!("{} does not name a file", display_path(path)),
         ));
     }
     // `path` ends with its file name, so this is that name's partial.
@@ -41,10 +43,7 @@ fn write_replace_with(path: &Path, bytes: &[u8], sync: SyncDir) -> io::Result<()
         _ => {}
     }
     // A partial that cannot be created is not ours: it stays.
-    let file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&partial)?;
+    let file = create_new(&partial)?;
     let result = write_synced(file, bytes).and_then(|()| fs::rename(&partial, path));
     if result.is_err() {
         let _ = fs::remove_file(&partial);
@@ -73,7 +72,7 @@ pub(crate) type SyncDir = fn(&Path) -> io::Result<()>;
 pub(crate) fn sync_dir_or_warn(dir: &Path, sync: SyncDir) {
     if let Err(error) = sync(dir) {
         tracing::warn!(
-            folder = %dir.display(),
+            folder = %display_path(dir),
             %error,
             "cannot sync the folder; the file just named in it may not survive a crash"
         );
@@ -125,6 +124,33 @@ fn write_synced(mut file: File, bytes: &[u8]) -> io::Result<()> {
     file.sync_all()
 }
 
+/// Creates the file `path`, open to read and write, only if nothing is at
+/// that name: a name that is taken fails with `AlreadyExists`, on every
+/// system, so the writers move on to the next name. Windows refuses to create
+/// a file where a folder is with `ERROR_ACCESS_DENIED`, which would read as a
+/// permission problem and fail the stack; there, a refusal at a name that is
+/// taken is `AlreadyExists` too.
+pub(crate) fn create_new(path: &Path) -> io::Result<File> {
+    let created = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(path);
+    match created {
+        #[cfg(windows)]
+        Err(error)
+            if error.kind() == io::ErrorKind::PermissionDenied
+                && fs::symlink_metadata(path).is_ok() =>
+        {
+            Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!("{} already exists", display_path(path)),
+            ))
+        }
+        created => created,
+    }
+}
+
 /// `<path>.partial`.
 fn partial_path(path: &Path) -> PathBuf {
     with_suffix(path, ".partial")
@@ -158,11 +184,7 @@ impl PartialFile {
     /// partial already exists (an earlier crash, or another writer).
     pub fn create(final_path: &Path) -> io::Result<Self> {
         let path = partial_path(final_path);
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .open(&path)?;
+        let file = create_new(&path)?;
         Ok(Self {
             path,
             file: Some(file),
@@ -266,7 +288,7 @@ fn rename_no_clobber(from: &Path, to: &Path) -> io::Result<()> {
         Err(e) => Err(e),
         Ok(_) => Err(io::Error::new(
             io::ErrorKind::AlreadyExists,
-            format!("{} already exists", to.display()),
+            format!("{} already exists", display_path(to)),
         )),
     }
 }
@@ -287,7 +309,7 @@ impl Drop for PartialFile {
 /// A failed [`PartialFile::persist_no_clobber`]: the cause, and the partial,
 /// still on disk, so the caller can retry under another name.
 #[derive(Debug, thiserror::Error)]
-#[error("cannot persist {}", file.path.display())]
+#[error("cannot persist {}", display_path(&file.path))]
 pub struct PersistError {
     #[source]
     pub error: io::Error,
@@ -301,9 +323,35 @@ impl From<PersistError> for io::Error {
     }
 }
 
+/// A path as the user knows it: lossy where it is not valid Unicode, and without the
+/// Windows verbatim prefix the core's canonical paths carry ([`without_verbatim_prefix`]).
+/// For display only: a lossy result may not open.
+pub fn display_path(path: &Path) -> String {
+    without_verbatim_prefix(&path.to_string_lossy()).into_owned()
+}
+
+/// `text`, a path, without the Windows verbatim prefix: `\\?\C:\a` is `C:\a`, and
+/// `\\?\UNC\host\share\a` is `\\host\share\a`; any other text (a volume's verbatim path
+/// among them, which has no other form) is left as it is. Plain string work, the same on
+/// every platform.
+pub fn without_verbatim_prefix(text: &str) -> Cow<'_, str> {
+    let Some(rest) = text.strip_prefix(r"\\?\") else {
+        return Cow::Borrowed(text);
+    };
+    if let Some(share) = rest.strip_prefix(r"UNC\") {
+        return Cow::Owned(format!(r"\\{share}"));
+    }
+    let mut chars = rest.chars();
+    let drive = chars
+        .next()
+        .is_some_and(|letter| letter.is_ascii_alphabetic())
+        && chars.next() == Some(':');
+    Cow::Borrowed(if drive { rest } else { text })
+}
+
 /// Why the output folder cannot receive the stacks.
 #[derive(Debug, thiserror::Error)]
-#[error("output folder {}: {reason}", path.display())]
+#[error("output folder {}: {reason}", display_path(path))]
 pub struct OutputDirError {
     pub path: PathBuf,
     pub reason: String,
@@ -336,7 +384,7 @@ pub fn ensure_output_dir(config: &JobConfig) -> Result<PathBuf, OutputDirError> 
     let input = config.input_dir.canonicalize().map_err(|e| {
         fail(format!(
             "the input folder {} cannot be resolved: {e}",
-            config.input_dir.display()
+            display_path(&config.input_dir)
         ))
     })?;
     if canonical == input {
@@ -574,6 +622,20 @@ mod tests {
     }
 
     #[test]
+    fn a_folder_at_the_partial_s_name_is_a_taken_name() {
+        // Windows refuses to create a file where a folder is as if access
+        // were denied; the name is taken all the same, so a writer moves on
+        // to the next one instead of failing.
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("a.psd.partial");
+        fs::create_dir(&folder).unwrap();
+        let error = PartialFile::create(&dir.path().join("a.psd")).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::AlreadyExists, "{error}");
+        assert!(folder.is_dir());
+        assert_eq!(entries(dir.path()), ["a.psd.partial"]);
+    }
+
+    #[test]
     fn dropped_partial_is_removed() {
         let dir = tempfile::tempdir().unwrap();
         let mut partial = PartialFile::create(&dir.path().join("a.psd")).unwrap();
@@ -581,6 +643,31 @@ mod tests {
         assert_eq!(entries(dir.path()), ["a.psd.partial"]);
         drop(partial);
         assert!(entries(dir.path()).is_empty());
+    }
+
+    #[test]
+    fn a_verbatim_windows_path_is_shown_without_its_prefix() {
+        assert_eq!(display_path(Path::new(r"\\?\C:\a")), r"C:\a");
+        assert_eq!(
+            display_path(Path::new(r"\\?\UNC\host\share")),
+            r"\\host\share"
+        );
+        assert_eq!(display_path(Path::new(r"C:\a")), r"C:\a");
+        assert_eq!(display_path(Path::new("/photos/trip")), "/photos/trip");
+    }
+
+    #[test]
+    fn only_a_drive_or_share_loses_its_verbatim_prefix() {
+        let strip = |text: &str| without_verbatim_prefix(text).into_owned();
+        assert_eq!(strip(r"\\?\C:\x"), r"C:\x");
+        assert_eq!(strip(r"\\?\d:\out\a_3.psd"), r"d:\out\a_3.psd");
+        assert_eq!(strip(r"\\?\UNC\server\share\x"), r"\\server\share\x");
+        // Anything else is left alone: a volume's verbatim path has no other form.
+        let volume = r"\\?\Volume{0123abcd}\x";
+        assert_eq!(strip(volume), volume);
+        assert_eq!(strip(r"C:\x"), r"C:\x");
+        assert_eq!(strip(r"\\server\share\x"), r"\\server\share\x");
+        assert_eq!(strip("/photos/trip"), "/photos/trip");
     }
 
     #[test]
@@ -603,14 +690,15 @@ mod tests {
         assert!(error.reason.contains("not a directory"), "{error}");
     }
 
-    #[cfg(unix)]
     #[test]
     fn ensure_output_dir_rejects_input_via_symlink() {
         let root = tempfile::tempdir().unwrap();
         let input = root.path().join("photos");
         fs::create_dir(&input).unwrap();
         let link = root.path().join("out");
-        std::os::unix::fs::symlink(&input, &link).unwrap();
+        if !photostacker_testkit::symlink_dir(&input, &link) {
+            return;
+        }
         let mut config = JobConfig::new(input);
         config.output_dir = link.clone();
 

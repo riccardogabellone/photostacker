@@ -184,11 +184,11 @@ where
 /// Why a [`JobConfig`] was rejected.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ConfigError {
-    #[error("input is not a directory: {}", .0.display())]
+    #[error("input is not a directory: {}", crate::fsio::display_path(.0))]
     InputNotADirectory(PathBuf),
     #[error("the output folder must differ from the input folder")]
     OutputEqualsInput,
-    #[error("output is not a directory: {}", .0.display())]
+    #[error("output is not a directory: {}", crate::fsio::display_path(.0))]
     OutputNotADirectory(PathBuf),
     #[error("{field} = {value} is out of range ({min} to {max})")]
     OutOfRange {

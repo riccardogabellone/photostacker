@@ -131,11 +131,32 @@ The Python app stayed in the tree as the parity reference for hashing and groupi
   - every layered TIFF shows its layers in all three without tag 34377, big-endian included.
 - **2026-11-11** A hand trial of the Windows build raised nothing further.
 
+### Three systems, the packages and the release
+
+- **2026-11-11** The command-line tool is renamed `photostacker-cli`. Its old name, `photostacker`, differed from the app's `Photostacker` only by case, which Windows and macOS file names do not tell apart.
+- **2026-11-11** Intel Macs join the targets, and macOS 11 is the oldest macOS on every Mac (`MACOSX_DEPLOYMENT_TARGET` in `.cargo/config.toml`).
+- **2026-11-11** ONNX Runtime is pinned per system in one table, `scripts/onnxruntime.tsv`, with a script that fetches it: 1.31.1, and 1.19.2 on Intel Macs, since Microsoft publishes no Intel macOS build after 1.23.2 and 1.19.2 is the newest one that runs on macOS 11.
+- **2026-11-11** ONNX Runtime is found inside a package (beside the executable, in `usr/lib/Photostacker`, in an app's `Frameworks`). A library that needs a newer macOS is not loaded: on a Mac with Apple silicon before macOS 14, the app says that the visual check needs macOS 14.
+- **2026-11-11** `photostacker-cli info` says what a build holds: its version, libheif and its HEVC decoder, the ONNX Runtime loaded, and the data folder.
+- **2026-11-11** libde265 is libheif's only codec wherever libheif is built, whatever codec libraries the build host has: a cmake toolchain file hides the others.
+- **2026-11-11** A dependency check with cargo-deny: licences, security advisories, banned crates and sources. It found an advisory against the bundled SQLite, fixed by moving to rusqlite 0.41 (SQLite 3.54.1). rusqlite no longer builds SQLite with the option that gives all connections one shared page cache, so the project now sets it itself.
+- **2026-11-12** Every package carries the licence texts of what it holds, in a `licenses` folder the About card opens: the crates' licences (made with cargo-about), the notices of what is not a crate, and the LGPL and GPL texts.
+- **2026-11-12** The tests run natively on Windows. Their first run there found a bug: on Windows, a folder standing at a stack's temporary name gave "access denied" instead of "already exists", so a resumed write failed that stack instead of taking the next name.
+- **2026-11-12** HEIC in the Windows build: libheif and libde265 built with vcpkg, at a pinned commit, by `scripts/windows-heif.ps1`.
+- **2026-11-12** Plain Windows paths, without the `\\?\` prefix, in everything the CLI prints and every text the core makes.
+- **2026-11-12** Names in scripts the Inter font does not cover are drawn with the system's fonts.
+- **2026-11-12** The packaging, written with cargo-packager for the three systems: a `.deb` and an AppImage for Linux, an installer, an MSI and a portable zip for Windows, and a disk image for each kind of Mac. `scripts/package.sh` builds them on their own system, and `scripts/smoke.sh` checks them: their contents, what they link, the minimum macOS, and a run of the CLI from each. The Linux packages were built and checked on a developer's machine; the Windows and macOS ones were first built by the workflows (below).
+- **2026-11-12** A static libde265 for the macOS build (`scripts/libde265.sh`), and a check that every object of a static library runs on macOS 11 (`scripts/macos-min.sh`).
+- **2026-11-12** The Linux build links the same static libde265, so libde265 is the pinned 1.1.3 on every system, built into every package; before, the Linux packages took the build host's shared library (1.0.8 on Ubuntu 22.04). The packaging script and the package check refuse a Linux build that needs a shared libde265; a development build may still use the system's.
+- **2026-11-12** The CI and release workflows. CI's jobs run side by side: one for the format and licence checks, and one per system (Linux, Windows and both kinds of Mac) for the lints, the tests and a release build. A tag builds and checks the packages on each system, attests their build provenance, and drafts a release with them and their checksums.
+- **2026-11-12** The workflows' first runs, on the pull request that brought them. The format and licence checks, the tests on Linux and Windows, and the Linux, Windows and Apple-silicon packages passed at once. macOS showed two things. On an Intel Mac the app did not link: libde265 chooses its AVX2 and AVX-512 kernels through a function of the C compiler's runtime library, which a Rust link on macOS leaves out, so the macOS build of libde265 now leaves those kernels out (its SSE4.1 ones remain). And macOS refuses to create a file name that is not valid UTF-8, so the four tests that make one are left out there. With both, the tests pass on both kinds of Mac, and every package builds and passes its check.
+- **2026-11-12** The macOS app is signed ad hoc. The first runs showed that the packager signed nothing: nothing sealed the app, and on Apple silicon its executables carried only the linker's signature. The packager now signs the app with no certificate (`signing-identity = "-"`), with the one entitlement that lets it load ONNX Runtime's library under the hardened runtime, and the package check verifies the seal and the entitlement. Nothing is notarised.
+
 ## What changed between the two
 
 | | Python app | Rust app |
 |---|---|---|
-| How it runs | FastAPI and HTMX web app, in Docker or through uv; photos bind-mounted or uploaded | Desktop app and CLI, native binaries; folders read in place; no server |
+| How it runs | FastAPI and HTMX web app, in Docker or through uv; photos bind-mounted or uploaded | Desktop app and CLI, native binaries; packaging written for Linux, Windows and macOS; folders read in place; no server |
 | EXIF reading | pyexiftool driving Perl exiftool | Own EXIF and MakerNote reader (Canon, Nikon, Sony, Fujifilm) |
 | Hashes for grouping | Plain pHash + dHash, distance ≤ 8, linked greedily from a seed | Brightness-normalised pHash + dHash, distance ≤ 8, union-find, plus bracket-run links up to 40 |
 | Visual check | DINOv2-base through onnxruntime, cosine 0.85, on when its extras were installed | Opt-in; DINOv2-small (cosine 0.50) or DINOv2-base (0.85), downloaded once after a question, checked by SHA-256 |
@@ -144,7 +165,7 @@ The Python app stayed in the tree as the parity reference for hashing and groupi
 | Merged image | The first layer written | The top layer (the first shot) |
 | Where data lives | SQLite, `.npz` embeddings and thumbnails in Docker volumes | One SQLite file with sqlite-vec in the platform's data folder, thumbnails in its cache folder; `PHOTOSTACKER_DATA_DIR` moves both |
 | RAW support | rawpy (LibRaw) | rawler (pure Rust), 16-bit sRGB or linear, embedded-JPEG fallback for unknown bodies |
-| HEIC | pillow-heif | libheif with libde265, built in; not yet in the Windows build |
+| HEIC | pillow-heif | libheif, built into the app, with libde265 as its only codec; tested on Linux and Windows |
 | Review | Confirm or reject each group; re-analyze at another cosine | Also move, split and merge, an Unstacked tray, live sliders, and jobs that resume after a quit |
 
 ## Decisions worth knowing
@@ -160,18 +181,30 @@ The Python app stayed in the tree as the parity reference for hashing and groupi
 - **One full-resolution layer in memory at a time.** Each layer is decoded, compressed to a spill file and freed before the next, which keeps large brackets within memory.
 - **Never overwrite.** Stacks are written as `.partial` and hard-linked to a free name, into `<input>/stacked` by default, which the scan always skips.
 - **Stand-in readers instead of Photoshop.** The development machine has no Photoshop, so GIMP, PhotoCraft and Photopea, written independently of the writers, gate the files; Photoshop itself is to open them before the first public release.
-- **No GPL dependency.** The app is MIT; LGPL is allowed only for rawler and libheif/libde265, and a test fails if libheif links a GPL encoder such as x265.
+- **No GPL dependency.** The app is MIT; LGPL is allowed only for rawler, for libheif/libde265, and in one third, known case: the code that the `wayland-protocols-plasma` crate (declared MIT; the window toolkit brings it in on Linux) generates from KDE's Wayland protocol files, 17 of them marked LGPL-2.1-or-later, which [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md) discloses. A test fails if libheif links a GPL encoder such as x265.
 
 ## Still open
 
-- Photoshop has opened none of the files yet; until it does, the 16-bit ZIP default and the absence of tag 34377 in layered TIFFs are provisional.
+- Photoshop has opened none of the files yet. Until it does, the 16-bit ZIP default and the absence of tag 34377 in layered TIFFs are provisional, and the sample set has no golden digests to check against. Photoshop opens the set by hand before the first public release ([design.md](design.md) §12.5).
 - No reader has confirmed the layers of a BigTIFF.
-- CI, packaging, the release workflow and the licence checks are not written; there are no installers yet.
-- HEIC is missing from the Windows build, and nothing has been built or run on macOS yet.
-- The visual check's default of 0.50 needs calibration on near-duplicate photos (the same scene from another angle), which no public set provides.
+- The release's own steps have not run yet: the check of the tag, the build-provenance attestations, the checksums and the draft release first run with the first tag.
+- No person has installed and started the macOS packages yet, and on macOS the app itself has never been opened: its tests and the command-line tool have run there, on GitHub's runners. The Linux and Windows packages have been tried by hand.
+- No package is signed by a developer's identity or notarised (the macOS app carries an ad-hoc signature), so Windows and macOS ask for one more step at the first start. Which message a Mac shows for the downloaded app has not been seen on a Mac yet, and no model has run from a signed macOS package: the package check loads ONNX Runtime there and reads its version.
+- The `models-v1` release, the model registry's fallback for the downloads, does not exist yet.
+- Files the tests do not cover yet: a tiled iPhone HEIC; portrait RW2, PEF, DNG and 3FR files; the full-size preview of a CR3; a HEIC whose colour is described only by an `nclx` box; Sony A7R III pixel shift, and whether it reads as an exposure bracket; P/1 and CMYK stills; the orientation in a PNG's `eXIf` chunk.
+- The EXIF golden files' tooling: pinning ExifTool's version, keeping its error records, a guard in the fetch script, and failing when a fixture folder is named but missing. The tests on the public camera files do not run in CI.
+- RAW: very large RAW files would need a develop in bands or tiles; a RAW is read twice when it is written; a panic of the decoder is not tested end to end.
+- The store's page cache: rusqlite 0.41 builds SQLite with a page cache per connection by default, and the project keeps one shared pool by setting the older option itself. Caches per connection would remove the shared pool's limit with very large jobs (about 200,000 photos), and choosing their sizes needs the review benchmark.
+- A review edit of a large job spends most of its time reading the embeddings (250 of 340 to 360 ms at 20,000 photos), and without EXIF times a folder is one bucket, which regroups in quadratic time (840 to 890 ms an edit at 20,000).
+- The file pickers run on the UI thread, which waits in them while they are open.
+- The larger preview of a photo waits while a job is running; the photo keeps its thumbnail until then.
+- On a file system that cannot lock files, the database's and the models' locks are logged and skipped, so two Photostackers on one data folder there are not kept apart.
+- A job's review ends with its write and cannot be reopened.
+- `Confirm all` and `Reject all` have no undo.
+- The visual check's default of 0.50 needs calibration on labelled near-duplicate photos (the same scene from another angle), which no public set provides.
 - The time window's range ends at 60 s; one trial folder still gained stacks at 45 and 60 s, and the Python app allowed 600 s.
 - On partly transparent stacks the merged image is the top layer alone, where Photoshop's composite would also show the layers below.
 - The bracketing path of the MakerNote parser has been checked on public bracket sets, not yet on the owner's own camera files.
-- Names in scripts the Inter font does not cover (CJK, Arabic, Hebrew, Thai) show missing glyphs.
+- Names in scripts the Inter font does not cover (CJK, Arabic, Hebrew, Thai) are drawn with the system's fonts, and as empty boxes where the system has no font for their script. A right-to-left name of several words, or with digits or Latin letters inside it, shows its parts in the wrong order.
 
 The rules for working in the repository are in [../AGENTS.md](../AGENTS.md).

@@ -1,18 +1,19 @@
-//! `photostacker models` (spec §8.2): the Stage 3 models in the app's models
+//! `photostacker-cli models` (spec §8.2): the Stage 3 models in the app's models
 //! folder (spec §7.1), which the GUI shares. Downloading and importing need
 //! the `ml` feature; listing and removing do not.
 
 #[cfg(feature = "ml")]
 use std::cell::Cell;
-use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, anyhow};
+use anyhow::anyhow;
 use clap::Subcommand;
 use photostacker_core::AppDirs;
+#[cfg(feature = "ml")]
+use photostacker_core::fsio::display_path;
 use photostacker_core::models::{self, MODELS, ModelSpec};
 
-use crate::Failure;
+use crate::{Failure, print_lines};
 
 /// The `models` subcommands.
 #[derive(Subcommand)]
@@ -54,18 +55,6 @@ pub(crate) fn models(command: &ModelsCommand) -> Result<(), Failure> {
             Ok(())
         }
     }
-}
-
-/// Prints each of `lines` to stdout; a stdout that is closed is a failure,
-/// not a panic.
-fn print_lines(lines: &[String]) -> Result<(), Failure> {
-    let mut stdout = io::stdout().lock();
-    lines
-        .iter()
-        .try_for_each(|line| writeln!(stdout, "{line}"))
-        .and_then(|()| stdout.flush())
-        .context("cannot write to stdout")
-        .map_err(Failure::Runtime)
 }
 
 /// The app's models folder.
@@ -126,7 +115,7 @@ fn import(_: &ModelSpec, _: &Path) -> Result<(), Failure> {
 #[cfg(not(feature = "ml"))]
 fn without_ml() -> Failure {
     Failure::Usage(
-        "this photostacker was built without ml: it cannot download or import a model".into(),
+        "this photostacker-cli was built without ml: it cannot download or import a model".into(),
     )
 }
 
@@ -177,7 +166,7 @@ fn import(spec: &ModelSpec, file: &Path) -> Result<(), Failure> {
 
 #[cfg(feature = "ml")]
 fn print_installed(file: &Path) -> Result<(), Failure> {
-    print_lines(&[file.display().to_string()])
+    print_lines(&[display_path(file)])
 }
 
 /// Which download progress reports get a line: the first one, then one
@@ -236,10 +225,8 @@ mod tests {
         let spec = &MODELS[1];
         let file = models::model_file(dir.path(), spec);
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-        std::fs::File::create(&file)
-            .unwrap()
-            .set_len(spec.size)
-            .unwrap();
+        // Sparse: the model's size costs no disk.
+        photostacker_testkit::sparse_file(&file, spec.size).unwrap();
         let lines = list_lines(dir.path());
         assert!(lines[0].ends_with("installed: no"), "{lines:?}");
         assert!(lines[1].ends_with("installed: yes"), "{lines:?}");

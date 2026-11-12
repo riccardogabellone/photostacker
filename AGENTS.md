@@ -9,41 +9,60 @@ Photostacker finds series of geometrically identical photos in a folder (exposur
 The design specification is [docs/design.md](docs/design.md). The code and the tests cite its sections as `spec §N`. Read the section before changing the behaviour it describes, and change the two together.
 
 - `crates/core/`: the `photostacker-core` library: discovery, EXIF, decoding, hashing, grouping, the store, the engine, the models and the writers. Everything that is not drawing or argv.
-- `crates/cli/`: the `photostacker` binary (`photostacker-cli` crate).
+- `crates/cli/`: the command-line tool, called the CLI below: binary and crate `photostacker-cli`.
 - `crates/ui/`: the desktop app, binary `Photostacker` (`photostacker-ui` crate, egui/eframe), over the core's engine on a thread of its own. Read [crates/ui/DESIGN.md](crates/ui/DESIGN.md) before changing the UI.
   - Its tests: `tests/controller.rs` (no window), `tests/interaction.rs` (`egui_kittest`: the real widgets over a real engine, end-to-end runs included), `tests/thumbs.rs`. `tests/common/` is what they share, and `tests/screens/` the screens of the screenshot example, which `interaction.rs` draws too.
 - `crates/testkit/`: dev-only fixtures (synthetic EXIF/TIFF bytes and scenes); a dev-dependency, never published.
 - `assets/`: the font, the icons, the logo's sources ([assets/logo/AGENTS.md](assets/logo/AGENTS.md)) and the README's screenshot.
-- `packaging/linux/`: the desktop entry, named after the app id.
-- `scripts/`: the Windows build ([scripts/win.ps1](scripts/win.ps1)), the stand-in readers ([scripts/standins/](scripts/standins/)), and the scripts that fetch the public camera files and generate the tests' golden files.
+- `packaging/`: how the packages are built and checked ([packaging/README.md](packaging/README.md)); the packager's configuration is in `crates/ui/Cargo.toml`.
+- `packaging/cmake/`: the cmake toolchain file of the libheif build ([packaging/cmake/libheif.cmake](packaging/cmake/libheif.cmake)), which keeps libde265 its only codec (spec §11.1).
+- `packaging/linux/`: the desktop entry and the AppStream file, named after the app id.
+- `packaging/macos/`: the entitlements of the macOS app's ad-hoc signature ([packaging/macos/entitlements.plist](packaging/macos/entitlements.plist); spec §11.3).
+- `packaging/licenses/`: the Free Software Foundation's texts of the LGPL-2.1, LGPL-3.0 and GPL-3.0, unchanged, which every package's `licenses` folder holds, and the template of `THIRD-PARTY-LICENSES.md` (spec §11.3).
+- `scripts/`: the Windows build ([scripts/win.ps1](scripts/win.ps1)) and its vcpkg for HEIC ([scripts/windows-heif.ps1](scripts/windows-heif.ps1)), the pinned libde265 of the Linux and macOS builds ([scripts/libde265.sh](scripts/libde265.sh)), the check that it is built into a Linux executable ([scripts/libde265-built-in.sh](scripts/libde265-built-in.sh)), the check of a static library's minimum macOS ([scripts/macos-min.sh](scripts/macos-min.sh)), the pinned ONNX Runtime builds and the script that fetches them ([scripts/ort.sh](scripts/ort.sh)), the packages' build, licences and check ([scripts/package.sh](scripts/package.sh), [scripts/licences.sh](scripts/licences.sh), [scripts/smoke.sh](scripts/smoke.sh)) and the Visual C++ runtime DLLs the Windows packages need ([scripts/vc-runtime.sh](scripts/vc-runtime.sh)), the stand-in readers ([scripts/standins/](scripts/standins/)), and the scripts that fetch the public camera files and generate the tests' golden files.
+- `.github/`: the CI and release workflows ([.github/workflows/](.github/workflows/)), the build inputs they share ([.github/actions/build-inputs/](.github/actions/build-inputs/action.yml)) and Dependabot's configuration for the actions (spec §11.2, §11.3).
 - `docs/`: the specification, the [history](docs/history.md), the [calibration](docs/calibration.md) of the thresholds, the [checks in other programs](docs/photoshop-checks.md) and the [EXIF coverage](docs/exif-fixture-coverage.md).
 
 The app's data (the job database, the models, the logs) lives in the platform's data folder, and its thumbnails in the cache folder (spec §7.1). `PHOTOSTACKER_DATA_DIR` moves both, for the app and the CLI alike: set it to a scratch folder for every run you start while developing, so a real user's data is never touched.
 
 ## Environment
 
-- **Toolchain:** stable Rust, 1.99 or later (`rust-version` in [Cargo.toml](Cargo.toml)), [just](https://github.com/casey/just) and [cargo-nextest](https://nexte.st).
-- **Linux packages:** `sudo apt install build-essential cmake pkg-config nasm libde265-dev libegl1 zenity`.
+- **Toolchain:** stable Rust, 1.99 or later (`rust-version` in [Cargo.toml](Cargo.toml)), [just](https://github.com/casey/just) 1.15 or later (the `justfile` uses `env()`), [cargo-nextest](https://nexte.st), [cargo-deny](https://github.com/EmbarkStudios/cargo-deny) (`cargo install cargo-deny --locked`) and, to make the licences file of the packages, [cargo-about](https://github.com/EmbarkStudios/cargo-about) 0.9.3 (`cargo install cargo-about --version 0.9.3 --locked --features cli`); to build the packages, [cargo-packager](https://github.com/crabnebula-dev/cargo-packager) 0.11.8 (`cargo install cargo-packager --version 0.11.8 --locked`).
+- **Linux packages:** `sudo apt install build-essential cmake pkg-config libde265-dev libegl1 zenity`.
+  - `libde265-dev` is the quick way to HEIC in a development build: without the pinned libde265's two variables (HEIC, below), libheif's build finds the system's libde265 and links it as a shared library. CI and the packages link the pinned libde265 statically instead, so the workflows' build inputs install this list without `libde265-dev`.
   - `zenity` gives the app its file dialogs where there is no XDG desktop portal; without either, the app says that no file dialog is available.
   - `libimage-exiftool-perl` is needed only to regenerate the EXIF golden file. ExifTool is never a build or run-time dependency.
-- **Windows:** `pwsh scripts/win.ps1` builds the desktop app with the MSVC toolchain (which must be installed, with Visual Studio's "Desktop development with C++" workload and the Windows SDK) into `dist/windows/`, with ONNX Runtime beside it. It builds without HEIC for now. The script stops, before cargo runs, when the app it would replace is running, or the toolchain or the SDK is missing. The tests have only been run on Linux so far.
-- **macOS:** nothing has been built there yet.
+- **Windows:** `pwsh scripts/win.ps1` builds the desktop app and `photostacker-cli` with the MSVC toolchain (which must be installed, with Visual Studio's "Desktop development with C++" workload and the Windows SDK) into `dist/windows/`, with ONNX Runtime beside them. HEIC is built in: the script first runs [scripts/windows-heif.ps1](scripts/windows-heif.ps1), which builds libheif and libde265 in a vcpkg checkout of its own, at a pinned commit, in `%LOCALAPPDATA%\photostacker\vcpkg`. The first run needs git and the network, and vcpkg's build takes a few minutes (about three on a recent laptop); later runs reuse it. `pwsh scripts/win.ps1 -Test [nextest arguments]` runs the tests natively, as `just test` does (it needs `cargo +stable-x86_64-pc-windows-msvc install cargo-nextest --locked`); `pwsh scripts/win.ps1 -Clippy [cargo clippy arguments]` runs the lints as the CI does, `cargo clippy --workspace --all-targets --locked -- -D warnings`, with the arguments before the `--` (it needs `rustup component add clippy --toolchain stable-x86_64-pc-windows-msvc`): the code behind `cfg(windows)` is linted only there; and `pwsh scripts/win.ps1 -Screenshot <out.png> <screen> [dark|light] [width] [height]` is `just screenshot`. None of the three touches `dist/windows/`. The script stops, before cargo runs, when an executable it would replace is running, or the toolchain, the SDK, or (for `-Test`) cargo-nextest or (for `-Clippy`) clippy is missing. The tests pass on Windows as on Linux; the few that need what Windows lacks say so where they are.
+- **macOS:** the build and the tests run on GitHub's macOS runners (Apple silicon and Intel), and no developer's Mac has built it yet: these steps follow what the workflows do (spec §11.1).
+  - Xcode's command line tools (`xcode-select --install`: the compilers and `otool`), cmake and pkg-config (with Homebrew: `brew install cmake pkgconf`).
+  - macOS has no system libde265: build the pinned one and set its two variables, as HEIC (below) says, with `PKG_CONFIG_LIBDIR`. On macOS `scripts/libde265.sh` builds it for `MACOSX_DEPLOYMENT_TARGET` (11.0 when unset), without its AVX2 and AVX-512 kernels (on an Intel Mac the app's link cannot take them: the script says why), and checks with `scripts/macos-min.sh` that every object in it runs there.
+  - `just ort` fetches ONNX Runtime (below). [.cargo/config.toml](.cargo/config.toml) sets `MACOSX_DEPLOYMENT_TARGET` to 11.0, the oldest macOS the app runs on, for rustc, the `cc` crate and cmake, unless the environment sets it.
 - **A checkout on a slow or shared drive** (a Windows drive seen from WSL, a network share): put `CARGO_TARGET_DIR=<a folder on the local disk>` in a `.env` file beside the `justfile`. The recipes load it, and it is not committed. Never let two systems build into one target folder.
 - **Line endings** are LF everywhere ([.gitattributes](.gitattributes)): the `justfile` and the shell scripts break on CRLF.
-- **ONNX Runtime** (core feature `ml`, on by default) is not linked at build time: the embedder loads Microsoft's official 1.31.1 shared library at run time, from `ORT_DYLIB_PATH` or from beside the executable (spec §8.3). On Linux x64, run `just ort` once: it downloads and verifies the library into the user's cache folder, and the `justfile` points `ORT_DYLIB_PATH` at it unless you set your own. Without the library, the tests that run a model print `skipped: ONNX Runtime not found at …` and pass. `cargo … --no-default-features` builds without `ml`; the CLI's `models download` and `models import` then exit 2 with "built without ml".
-- **HEIC** (core feature `heic`, on by default): `libheif-sys` builds libheif with cmake but links its codecs from the system, enabling every one cmake finds. libde265 is the HEVC decoder. Never install `libx265-dev` or `libx264-dev` on a build host: libheif would link those GPL encoders, and a test fails if it does. Without the feature, HEIC files are reported as "built without heic".
+- **ONNX Runtime** (core feature `ml`, on by default) is not linked at build time: the embedder loads Microsoft's official shared library at run time, from `ORT_DYLIB_PATH`, or else from beside the executable or the package's library folder (`../lib/Photostacker` on Linux, `../Frameworks` in a macOS app; spec §8.3). The version and SHA-256 of each system's build are pinned in one table, [scripts/onnxruntime.tsv](scripts/onnxruntime.tsv), which every script that fetches one reads: 1.31.1, and 1.19.2 on Intel macOS. On Linux x64 and macOS, run `just ort` once: it calls `scripts/ort.sh`, which downloads and verifies the library into the user's cache folder, and the `justfile` points `ORT_DYLIB_PATH` at it unless you set your own. Without the library, the tests that run a model print `skipped: ONNX Runtime not found at …` and pass. `cargo … --no-default-features` builds without `ml`; the CLI's `models download` and `models import` then exit 2 with "built without ml".
+- **HEIC** (core feature `heic`, on by default): on Linux and macOS `libheif-sys` builds libheif with cmake (on Windows it takes libheif from vcpkg: see Windows above), which on its own would link every codec library it finds on the build host, the GPL encoders x265 and x264 among them. [.cargo/config.toml](.cargo/config.toml) sets `CMAKE_TOOLCHAIN_FILE` to [packaging/cmake/libheif.cmake](packaging/cmake/libheif.cmake), which hides all of them but libde265, the HEVC decoder. The other codec libraries a host has installed are ignored. A `CMAKE_TOOLCHAIN_FILE` already in the environment takes its place. Cargo reads `.cargo/config.toml` from the folder it starts in, so its three settings (this toolchain file, the SQLite option in `LIBSQLITE3_FLAGS` and the macOS floor in `MACOSX_DEPLOYMENT_TARGET`) reach only a cargo started in the repository: a build started elsewhere with `--manifest-path`, or `cargo install --git`, gets none of them. The test `libde265_is_the_only_codec` fails if libheif has any other codec; the file says how to bring its list up to date when libheif is updated. Without the feature, HEIC files are reported as "built without heic".
+  - **The pinned libde265.** Every package links the same libde265 release, 1.1.3, statically: on Windows vcpkg's; on Linux and macOS the one `scripts/libde265.sh <prefix>` builds, with `<prefix>` any folder outside the repository. The script downloads the pinned release, checks its SHA-256, and builds a static library into `<prefix>`; a second run with the library in place builds nothing (on macOS it checks the library again). Then set, for every cargo and `just` command, as the workflows' build inputs do, with `<prefix>` as an absolute path: `CMAKE_PREFIX_PATH=<prefix>`, and on Linux `PKG_CONFIG_PATH=<prefix>/lib/pkgconfig`, on macOS `PKG_CONFIG_LIBDIR=<prefix>/lib/pkgconfig` (the recipes also read them from `.env`, above). libheif's build then finds libde265 there before the system's folders, and links it statically, even beside a system's `libde265-dev`.
+  - `PKG_CONFIG_PATH` adds the folder to pkg-config's search, and `PKG_CONFIG_LIBDIR` replaces the search with it. Linux needs the first: `x11-dl`, a crate of the window toolkit, asks pkg-config where the system's X11 libraries are. On macOS no crate asks pkg-config about the system's libraries, so the second keeps the build to that folder alone.
+  - libheif's cmake build keeps the libde265 it found first: after setting, changing or removing the variables, run `cargo clean -p libheif-sys` and `cargo clean --release -p libheif-sys`, with the same `CARGO_TARGET_DIR` the recipes use (a bare cargo does not read `.env`: load it first, for instance with `set -a; . ./.env; set +a`). Without that clean, switching between the system's libde265 and the pinned one can leave libheif compiled against one library's headers and linked with the other, and no check sees it: the checks of the libraries an executable needs pass.
+  - On Linux `scripts/libde265-built-in.sh <executable>…` fails when an executable needs a shared libde265. `scripts/package.sh` runs it before it packages, and CI after its release build; `scripts/smoke.sh` fails a package built that way.
 
 ## Setup and commands
 
 Run these at the repo root. `<scratch>` is any empty folder outside the repository.
 
 ```sh
+just                          # list the recipes
 just check                    # the quality gate: fmt-check, clippy, test
 just fmt-check                # cargo fmt --all --check
 just clippy                   # cargo clippy --workspace --all-targets -- -D warnings
 just test                     # cargo nextest run --workspace
 just test -E 'test(model::)'  # extra arguments go to nextest
 just test --no-default-features  # the same tests without ml and heic
+just deny                     # cargo deny check: licences, advisories, bans and sources (deny.toml); needs the network
+just licences                 # the crates' licences, with their texts (about.toml), into dist/package/resources/licenses/THIRD-PARTY-LICENSES.md; needs the network
+just package deb,appimage     # this system's packages into dist/packages (dmg on macOS; scripts/package.sh nsis,wix in Git Bash on Windows); packaging/README.md
+just smoke dist/packages/*.deb dist/packages/*.AppImage  # check built packages: contents, links, a run of the CLI from each; installs nothing
+# just smoke --install …      really installs the .deb and the NSIS installer: only on a throwaway machine (a CI runner)
 
 PHOTOSTACKER_DATA_DIR=<scratch> just run          # the desktop app, release build
 just run-cli --help                                # the CLI, release build; arguments go to the binary
@@ -51,8 +70,9 @@ just run-cli run <input> -o <scratch>/stacks       # group a folder and write it
 just run-cli run <input> --dry-run --plan <scratch>/plan.json  # group only; without --plan the plan goes to stdout
 just run-cli run <input> --db <scratch>/jobs.db --no-ml        # keep the job in a database; no visual check
 PHOTOSTACKER_DATA_DIR=<scratch> just run-cli models download dinov2-small  # also list, import, remove
+PHOTOSTACKER_DATA_DIR=<scratch> just run-cli info  # the HEIC decoder, the ONNX Runtime loaded and its version, the data folder
 
-just ort                      # once, on Linux x64: ONNX Runtime 1.31.1, which the model tests need
+just ort                      # once, on Linux x64 and macOS: the ONNX Runtime pinned for the system, which the model tests need
 just screenshot <out.png> <screen> [dark|light] [width] [height]  # one screen of the real window; an unknown screen lists them all
 just screenshot assets/screenshots/ui.png review dark              # the README's screenshot, on synthetic photos only
 just ps-samples --bigtiff     # the sample set for the checks in other programs, into dist/ps-check (docs/photoshop-checks.md)
@@ -62,7 +82,10 @@ just calibrate-ml dinov2-small <folder of bracket sets>  # the visual check's co
 On Windows:
 
 ```powershell
-pwsh scripts/win.ps1          # the desktop app, built natively into dist/windows
+pwsh scripts/win.ps1          # the desktop app and the CLI, built natively into dist/windows
+pwsh scripts/win.ps1 -Test    # the tests; extra arguments go to nextest (e.g. -E 'test(heic)')
+pwsh scripts/win.ps1 -Clippy  # the lints, warnings as errors; extra arguments go to cargo clippy
+pwsh scripts/win.ps1 -Screenshot <out.png> <screen> [dark|light]  # as just screenshot
 node scripts/standins/standins.mjs --photocraft <folder>/photocraft-cli.exe  # the samples in GIMP, PhotoCraft and Photopea
 ```
 
@@ -73,10 +96,10 @@ node scripts/standins/standins.mjs --photocraft <folder>/photocraft-cli.exe  # t
 - Keep functions small and focused on a single task.
 - Every job parameter lives in `JobConfig` and is validated there, once, by `JobConfig::validate()`; the rest of the code trusts a validated config.
 - The core never depends on the UI: `photostacker-core` must not depend on egui or clap.
-- After start-up, the UI thread never calls the engine and does no file I/O: both go through the backend thread.
+- After start-up, the UI thread never calls the engine, and the app's code on it reads no file and lists no folder: the engine's work goes through the backend thread, other file reads through threads of their own. The rule's two exceptions (a dropped path's one folder check, and egui's own lookup of a system font) are in `crates/ui/DESIGN.md`, "State and the engine"; new code may not add a third.
 - Record each UI design choice in `crates/ui/DESIGN.md`. Colours come from `theme::Palette` only, and every interactive widget names itself (`WidgetInfo`).
 - The EXIF and MakerNote reader is the project's own: do not add exiftool, exiftool-rs, kamadak-exif or nom-exif.
-- Licence: MIT. No GPL dependency. LGPL is allowed only for `rawler` (2.1) and libheif/libde265 (3.0) through `libheif-rs`.
+- Licence: MIT. No GPL dependency. LGPL is allowed only for `rawler` (2.1), for libheif/libde265 (3.0) through `libheif-rs`, and in one third, known case: the code that the `wayland-protocols-plasma` crate (declared MIT; the window toolkit brings it in on Linux) generates from KDE's Wayland protocol files, 17 of them marked LGPL-2.1-or-later, which [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) discloses. No other LGPL code is allowed, in a crate or in a crate's files. `just deny` checks the licences, the advisories, the banned crates and the sources against [deny.toml](deny.toml): run it when a dependency is added or updated.
 - Code ported from another project keeps its notice: a section with the original licence in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), and a header in the file that holds the port.
 - Code, comments, docs and commit messages are in English.
 
@@ -95,4 +118,15 @@ node scripts/standins/standins.mjs --photocraft <folder>/photocraft-cli.exe  # t
 - One change per commit and per pull request.
 - The subject line is a conventional commit (`feat(core): …`, `fix(ui): …`, `docs: …`). The body is a short list of bullets: what changed and why, as few as tell the story. No trailers: no `Co-Authored-By`, no tool or session lines.
 - Run `just check` before every commit. Update `docs/design.md` and the README when behaviour changes, and `crates/ui/DESIGN.md` when the UI does.
-- The version is the workspace's, in [Cargo.toml](Cargo.toml). A release is a tag `vX.Y.Z` on `main`. The CI and release workflows are not written yet.
+- The version is the workspace's: `version` in `[workspace.package]` of [Cargo.toml](Cargo.toml).
+- The checks of a pull request, by job name (spec §11.2):
+  - [.github/workflows/ci.yml](.github/workflows/ci.yml), on every pull request and every push to `main`:
+    - `Format, lints and licences`: `cargo fmt --all --check` and `cargo deny check`, on Ubuntu.
+    - `Tests (ubuntu-latest)`, `Tests (windows-latest)`, `Tests (macos-15)`, `Tests (macos-15-intel)`: clippy with warnings as errors, `cargo nextest run --workspace --locked --no-fail-fast` (on Linux also with `--no-default-features`), a release build of both executables, on Linux `scripts/libde265-built-in.sh` on them, and on macOS `scripts/macos-min.sh 11.0` on libheif's objects. A step before the tests fails the job when ONNX Runtime or dinov2-small is missing or the runner has fewer than three cores, so the tests that need them never skip there.
+  - [.github/workflows/release.yml](.github/workflows/release.yml), on a pull request that changes the packaging (that workflow, `.github/actions/`, `packaging/`, `assets/icons/`, `crates/ui/Cargo.toml`, `crates/ui/build.rs`, `crates/cli/src/info.rs`, `crates/core/src/package.rs`, `crates/core/src/models/runtime.rs`, `scripts/`, `Cargo.lock` or `.cargo/`): `Package (ubuntu-22.04)`, `Package (windows-latest)`, `Package (macos-15)`, `Package (macos-15-intel)` build and check that system's packages, with no release.
+- A release (spec §11.3, [packaging/README.md](packaging/README.md)):
+  1. Bump `version` in `[workspace.package]` of the root `Cargo.toml` in a pull request, and merge it.
+  2. Tag the merge commit on `main` as `vX.Y.Z`, the new version, and push the tag.
+  3. The release workflow checks that the tag is `v` and the workspace's version, builds the packages on four runners (Ubuntu 22.04, Windows, macOS on Apple silicon and on Intel), checks each with `scripts/smoke.sh --install`, attests the build provenance of every file (kept in GitHub's attestation store, not in the release), and creates a draft GitHub release with the packages and `checksums.txt` (their SHA-256).
+  4. Download the packages from the draft and try them on each system. Photoshop opens the sample set before each release (spec §12.5, [docs/photoshop-checks.md](docs/photoshop-checks.md)).
+  5. Publish the draft.

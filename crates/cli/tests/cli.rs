@@ -1,4 +1,4 @@
-//! End-to-end tests of the `photostacker` binary: synthetic brackets are
+//! End-to-end tests of the `photostacker-cli` binary: synthetic brackets are
 //! written to a temporary folder and the CLI is run on them.
 
 use std::fs;
@@ -9,6 +9,7 @@ use std::sync::Arc;
 use assert_cmd::Command;
 use assert_cmd::assert::Assert;
 use photostacker_core::appdirs::DATA_DIR_ENV;
+use photostacker_core::fsio::display_path;
 use photostacker_core::model::RawTone;
 use photostacker_core::models::MODELS;
 use photostacker_core::{AppDirs, Engine, EngineOptions, PlanV1, Store};
@@ -73,7 +74,7 @@ const SECOND_BRACKET: [&str; 3] = ["IMG_0004.jpg", "IMG_0005.jpg", "IMG_0006.jpg
 /// The CLI with the app data in `data` (spec §7.1), so no test touches the
 /// user's real data.
 fn photostacker_in(data: &Path) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_photostacker"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_photostacker-cli"));
     command.env(DATA_DIR_ENV, data);
     command
 }
@@ -119,6 +120,27 @@ fn read_plan(path: &Path) -> PlanV1 {
 
 fn paths(names: &[&str]) -> Vec<PathBuf> {
     names.iter().map(PathBuf::from).collect()
+}
+
+/// The tool is `photostacker-cli`: a name that differs from the app's
+/// (`Photostacker`) by more than case, so the two files can sit side by side
+/// on Windows and macOS, whose file names ignore case.
+#[test]
+fn the_tool_is_named_photostacker_cli() {
+    photostacker()
+        .arg("--version")
+        .assert()
+        .success()
+        .stdout(format!("photostacker-cli {}\n", env!("CARGO_PKG_VERSION")));
+
+    let output = photostacker()
+        .arg("--help")
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let help = String::from_utf8(output.stdout).unwrap();
+    assert!(help.contains("Usage: photostacker-cli"), "{help}");
 }
 
 #[test]
@@ -281,8 +303,9 @@ fn unreadable_input_root_exits_1() {
 }
 
 /// JSON needs UTF-8 paths, so a non-UTF-8 input folder is a
-/// runtime failure whose message names the problem.
-#[cfg(unix)]
+/// runtime failure whose message names the problem. Not on macOS, whose
+/// file system (APFS) refuses to create a name that is not valid UTF-8.
+#[cfg(all(unix, not(target_os = "macos")))]
 #[test]
 fn non_utf8_path_exits_1_with_a_clear_message() {
     use std::ffi::OsStr;
@@ -308,6 +331,12 @@ fn stdout_paths(assert: &Assert) -> Vec<PathBuf> {
         .lines()
         .map(PathBuf::from)
         .collect()
+}
+
+/// The absolute path of the existing `path` as the CLI prints it: canonical, and on
+/// Windows without the verbatim `\\?\` prefix that canonical paths carry there.
+fn printed(path: &Path) -> PathBuf {
+    PathBuf::from(display_path(&path.canonicalize().unwrap()))
 }
 
 /// The names of the entries of `dir`, sorted.
@@ -349,7 +378,7 @@ fn run_writes_one_psd_per_group_and_prints_paths() {
     let assert = photostacker().arg("run").arg(&input).assert().success();
 
     // The default output folder, `<input>/stacked`; the paths are absolute.
-    let output = input.join("stacked").canonicalize().unwrap();
+    let output = printed(&input.join("stacked"));
     assert_eq!(
         stdout_paths(&assert),
         [output.join("IMG_0001_3.psd"), output.join("IMG_0004_3.psd")]
@@ -385,7 +414,7 @@ fn run_twice_never_overwrites() {
     let first_bytes = fs::read(&first[0]).unwrap();
     let second = stdout_paths(&run());
 
-    let output = output.canonicalize().unwrap();
+    let output = printed(&output);
     assert_eq!(first, [output.join("IMG_0001_3.psd")]);
     assert_eq!(second, [output.join("IMG_0001_3-1.psd")]);
     assert_eq!(fs::read(&first[0]).unwrap(), first_bytes);
@@ -437,7 +466,7 @@ fn format_tiff_writes_tif() {
         .assert()
         .success();
 
-    let path = output.canonicalize().unwrap().join("IMG_0001_3.tif");
+    let path = printed(&output).join("IMG_0001_3.tif");
     assert_eq!(stdout_paths(&assert), std::slice::from_ref(&path));
     // A big-endian classic TIFF.
     assert_eq!(fs::read(&path).unwrap()[..4], *b"MM\0*");
@@ -466,7 +495,7 @@ fn run_with_plan_writes_the_plan_and_the_stacks() {
     let plan = read_plan(&plan_file);
     assert!(plan.config.auto_confirm);
     assert_eq!(plan.groups[0].files, paths(&BRACKET));
-    let path = output.canonicalize().unwrap().join("IMG_0001_3.psd");
+    let path = printed(&output).join("IMG_0001_3.psd");
     assert_eq!(stdout_paths(&assert), [path]);
 }
 
@@ -523,11 +552,10 @@ fn run_names_each_per_file_error() {
     fs::write(input.join("aa-cut.jpg"), &whole[..whole.len() / 2]).unwrap();
     fs::write(input.join("zz-garbage.jpg"), b"not a photo at all").unwrap();
     let mut failed = vec!["aa-cut.jpg"];
-    // A dangling symlink is an entry the scan cannot read.
-    #[cfg(unix)]
-    {
-        std::os::unix::fs::symlink(root.path().join("gone.jpg"), input.join("mm-dangling.jpg"))
-            .unwrap();
+    // A dangling symlink is an entry the scan cannot read; where the account
+    // may not make one, the rest of the test still runs.
+    let gone = root.path().join("gone.jpg");
+    if photostacker_testkit::symlink_file(&gone, &input.join("mm-dangling.jpg")) {
         failed.push("mm-dangling.jpg");
     }
     failed.push("zz-garbage.jpg");
@@ -551,7 +579,7 @@ fn run_names_each_per_file_error() {
         assert!(line.starts_with(&prefix), "{line:?} is not {prefix:?}…");
         assert!(line.len() > prefix.len(), "{line:?} gives no reason");
     }
-    let path = root.path().join("out").canonicalize().unwrap();
+    let path = printed(&root.path().join("out"));
     assert_eq!(stdout_paths(&assert), [path.join("IMG_0001_3.psd")]);
     let summary = format!(
         "{} files, 1 groups, 0 unstacked, {} errors; 1 written, 0 skipped, 0 failed",
@@ -559,6 +587,145 @@ fn run_names_each_per_file_error() {
         failed.len()
     );
     assert!(stderr.contains(&summary), "{summary:?} not in {stderr}");
+}
+
+/// Gives the JPEG at `path` an ICC profile, in an APP2 segment right after its
+/// start-of-image marker: the other members of its stack then get a writing
+/// warning each (`IccMismatch`, spec §5.5).
+#[cfg(windows)]
+fn with_icc_profile(path: &Path) {
+    let jpeg = fs::read(path).unwrap();
+    let icc = photostacker_testkit::icc_stub(b"mntr", b"RGB ");
+    let payload = [b"ICC_PROFILE\0".as_slice(), &[1, 1], &icc].concat();
+    let len = u16::try_from(payload.len() + 2).unwrap();
+    let segment = [&[0xFF, 0xE2][..], &len.to_be_bytes(), &payload].concat();
+    fs::write(path, [&jpeg[..2], &segment, &jpeg[2..]].concat()).unwrap();
+}
+
+/// On Windows a canonical path carries the verbatim `\\?\` prefix: the
+/// engine's output paths do, and so do the photos' paths when the input is
+/// given in that form, as a script may give it. The CLI prints none of it:
+/// not in the stacks' paths on stdout, nor in the files its `error:` and
+/// `warning:` lines name.
+#[cfg(windows)]
+#[test]
+fn the_paths_the_cli_prints_are_plain() {
+    let root = tempfile::tempdir().unwrap();
+    let input = root.path().join("photos");
+    write_bracket(&input, BRACKET);
+    with_icc_profile(&input.join(BRACKET[0]));
+    fs::write(input.join("zz-garbage.jpg"), b"not a photo at all").unwrap();
+    let output = root.path().join("out");
+    let verbatim = input.canonicalize().unwrap();
+    assert!(verbatim.to_str().unwrap().starts_with(r"\\?\"));
+
+    let assert = photostacker()
+        .arg("run")
+        .arg(&verbatim)
+        .arg("-o")
+        .arg(&output)
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
+    let named: Vec<&str> = stderr
+        .lines()
+        .filter(|line| line.starts_with("error: ") || line.starts_with("warning: "))
+        .collect();
+    assert!(
+        named.iter().any(|line| line.contains("zz-garbage.jpg")),
+        "{stderr}"
+    );
+    // The two shots without the first one's profile, each by its full path.
+    let warned: Vec<&&str> = named
+        .iter()
+        .filter(|line| line.starts_with("warning: "))
+        .collect();
+    assert_eq!(warned.len(), 2, "{stderr}");
+    for (line, name) in warned.iter().zip(&BRACKET[1..]) {
+        let file = display_path(&verbatim.join(name));
+        assert!(line.starts_with(&format!("warning: {file}: ")), "{line:?}");
+    }
+    assert!(!stdout.contains(r"\\?\"), "{stdout}");
+    assert!(!stderr.contains(r"\\?\"), "{stderr}");
+    assert_eq!(
+        stdout_paths(&assert),
+        [printed(&output).join("IMG_0001_3.psd")]
+    );
+}
+
+/// A stack that fails says why with the path it could not use, as the user
+/// knows it: on Windows the core works under the output folder's canonical
+/// path, whose verbatim `\\?\` prefix appears nowhere in what the CLI prints.
+/// Here a file `a` in the output folder stands where the stacks of `a/deep`
+/// need a folder; the stack at the top is written all the same.
+#[test]
+fn a_failed_stack_names_its_path_plainly() {
+    let root = tempfile::tempdir().unwrap();
+    let input = root.path().join("photos");
+    write_bracket(&input, BRACKET);
+    write_bracket_of(&input.join("a").join("deep"), SECOND_BRACKET, 2, 5);
+    let output = root.path().join("out");
+    fs::create_dir(&output).unwrap();
+    fs::write(output.join("a"), b"a file, not a folder").unwrap();
+
+    let assert = photostacker()
+        .arg("run")
+        .arg(&input)
+        .arg("-o")
+        .arg(&output)
+        .arg("--recursive")
+        .assert()
+        .code(1);
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
+    let deep = printed(&output).join("a").join("deep");
+    let failed = stderr
+        .lines()
+        .find(|line| line.starts_with("stack of ") && line.contains(" failed: "))
+        .unwrap_or_else(|| panic!("no failed stack in {stderr}"));
+    assert!(
+        failed.contains(&format!("the output subfolder {} ", deep.display())),
+        "{failed:?}"
+    );
+    assert!(!stdout.contains(r"\\?\"), "{stdout}");
+    assert!(!stderr.contains(r"\\?\"), "{stderr}");
+    assert_eq!(
+        stdout_paths(&assert),
+        [printed(&output).join("IMG_0001_3.psd")]
+    );
+}
+
+/// A folder whose name is not ASCII (an accented letter, CJK characters) works
+/// as the input, with the output folder and the job database inside it: the
+/// run writes its stack there and prints its path.
+#[test]
+fn folders_with_names_outside_ascii_work() {
+    let root = tempfile::tempdir().unwrap();
+    let input = root.path().join("séance 日本");
+    write_bracket(&input, BRACKET);
+    let output = input.join("piles 日本");
+    let db = input.join("tâches 日本.db");
+
+    let assert = photostacker()
+        .arg("run")
+        .arg(&input)
+        .arg("-o")
+        .arg(&output)
+        .arg("--db")
+        .arg(&db)
+        .assert()
+        .success();
+
+    let stack = printed(&output).join("IMG_0001_3.psd");
+    assert_eq!(stdout_paths(&assert), std::slice::from_ref(&stack));
+    assert_stack_of(&stack, BRACKET);
+    let jobs = Store::open_read_only(&db).unwrap().jobs().unwrap();
+    assert_eq!(jobs.len(), 1, "{jobs:?}");
+    assert_eq!(jobs[0].config.input_dir, input);
+    assert_eq!(jobs[0].config.output_dir, output);
 }
 
 /// rawler logs recoverable trouble through `log`, at error level too (a
@@ -959,6 +1126,106 @@ fn models_remove_of_a_missing_model_succeeds() {
         .stdout("");
 }
 
+/// The four lines `info` prints with the app's data in `data` and `env` set
+/// for the child, which must end with status 0 and print nothing on stderr.
+fn info_lines(data: &Path, env: &[(&str, &Path)]) -> Vec<String> {
+    let mut command = photostacker_in(data);
+    for (name, value) in env {
+        command.env(name, value);
+    }
+    let output = command
+        .arg("info")
+        .assert()
+        .success()
+        .stderr("")
+        .get_output()
+        .clone();
+    let lines: Vec<String> = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(str::to_owned)
+        .collect();
+    assert_eq!(lines.len(), 4, "{lines:?}");
+    lines
+}
+
+/// `info` names the tool, the HEIC decoder, the visual check's runtime and the
+/// data folder, in that order, and creates nothing: not even the data folder.
+#[test]
+fn info_names_the_tool_and_its_parts() {
+    let root = tempfile::tempdir().unwrap();
+    let data = root.path().join("data");
+
+    let lines = info_lines(&data, &[]);
+
+    assert_eq!(
+        lines[0],
+        format!("photostacker-cli {}", env!("CARGO_PKG_VERSION"))
+    );
+    if cfg!(feature = "heic") {
+        assert!(lines[1].starts_with("heic: libheif "), "{lines:?}");
+        assert!(lines[1].ends_with(", HEVC decoder libde265"), "{lines:?}");
+    } else {
+        assert_eq!(lines[1], "heic: not built in");
+    }
+    if cfg!(feature = "ml") {
+        assert!(lines[2].starts_with("visual check: "), "{lines:?}");
+    } else {
+        assert_eq!(lines[2], "visual check: not built in");
+    }
+    assert_eq!(lines[3], format!("data: {}", data.display()));
+    assert!(!data.exists(), "info created {}", data.display());
+    assert!(entries(root.path()).is_empty());
+}
+
+/// Without ONNX Runtime the visual check's line says why it cannot run, and
+/// `info` still succeeds.
+#[cfg(feature = "ml")]
+#[test]
+fn info_says_why_the_visual_check_cannot_run() {
+    let root = tempfile::tempdir().unwrap();
+    let nowhere = root.path().join("nowhere").join("libonnxruntime.so");
+
+    let lines = info_lines(root.path(), &[("ORT_DYLIB_PATH", &nowhere)]);
+
+    assert_eq!(
+        lines[2],
+        format!(
+            "visual check: ONNX Runtime not found at {}",
+            nowhere.display()
+        )
+    );
+}
+
+/// With ONNX Runtime installed, the line names its version and the library
+/// that was loaded. The child inherits `ORT_DYLIB_PATH`, which is what is
+/// looked at: without it the child would look beside its own executable,
+/// not where this test's process would.
+#[cfg(feature = "ml")]
+#[test]
+fn info_names_the_loaded_runtime() {
+    let library = std::env::var_os("ORT_DYLIB_PATH")
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from);
+    let Some(library) = library.filter(|library| library.is_file()) else {
+        println!("skipped: ORT_DYLIB_PATH is not set to an ONNX Runtime library");
+        return;
+    };
+    let data = tempfile::tempdir().unwrap();
+
+    let lines = info_lines(data.path(), &[]);
+
+    assert!(
+        lines[2].starts_with("visual check: ONNX Runtime 1."),
+        "{lines:?}"
+    );
+    let absolute = std::path::absolute(&library).unwrap();
+    assert!(
+        lines[2].ends_with(&format!(" at {}", absolute.display())),
+        "{lines:?}"
+    );
+}
+
 /// Ctrl+C while the stacks are written cancels the job: the run says so,
 /// exits 1, and leaves no unfinished stack nor spill file behind.
 #[cfg(unix)]
@@ -986,7 +1253,7 @@ fn ctrl_c_cancels_and_cleans_up() {
     let output = root.path().join("out");
     let data = tempfile::tempdir().unwrap();
 
-    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_photostacker"))
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_photostacker-cli"))
         .env(DATA_DIR_ENV, data.path())
         .arg("run")
         .arg(&input)

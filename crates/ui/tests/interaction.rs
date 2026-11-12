@@ -20,12 +20,12 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use common::{
-    DroppedPath, FAILED_REASON, FakeInstaller, FakePlatform, Gate, HeldEmbedder, NEAR, OpenOnDrop,
-    TIME_WINDOW, bracket_folder, click, controller, data_dir, drop_folder, harness,
-    harness_embedding, harness_installing, harness_revealing, harness_with, options, place_model,
-    psd_layer_names, raw_bracket_folder, review_folder, run_until, run_until_drawn,
-    shown_layer_names, store_brackets, store_lone_photos, write_ambiguous_stack,
-    write_bracket_folder, write_spaced_shots,
+    DroppedPath, FAILED_REASON, FakeInstaller, FakePlatform, Gate, HeldEmbedder, NEAR, NEEDS_MACOS,
+    OpenOnDrop, TIME_WINDOW, bracket_folder, click, controller, data_dir, drop_folder, harness,
+    harness_embedding, harness_installing, harness_revealing, harness_with, harness_with_options,
+    options, place_model, psd_layer_names, raw_bracket_folder, review_folder, run_until,
+    run_until_drawn, runtime_needing_macos, shown_layer_names, store_brackets, store_lone_photos,
+    write_ambiguous_stack, write_bracket_folder, write_spaced_shots,
 };
 use eframe::egui::{
     self, Key, Modifiers, ThemePreference, ViewportId,
@@ -3699,6 +3699,52 @@ fn the_about_card_names_the_lgpl_components() {
     assert_eq!(*platform.revealed.lock().unwrap(), [logs_dirs.logs()]);
 }
 
+/// The About card's way to the licence texts a package ships.
+const OPEN_LICENCES: &str = "Open the licences folder";
+/// What the About card says above [`OPEN_LICENCES`].
+const LICENCES_SHIP: &str = "The licence texts of every part ship with the app.";
+
+#[test]
+fn the_about_card_opens_the_licences_folder_when_the_package_has_one() {
+    // A development build has no licences folder: the card says nothing of one.
+    let (_data, dirs) = data_dir();
+    let mut harness = harness(&dirs);
+    click(&mut harness, "Settings");
+    assert!(harness.query_by_label("Open the logs folder").is_some());
+    assert!(harness.query_by_label(OPEN_LICENCES).is_none());
+    assert!(harness.query_by_label(LICENCES_SHIP).is_none());
+    drop(harness);
+
+    // A package's: the sentence and the button, which shows that folder in the file
+    // manager, on the reveal's thread.
+    let licences = tempfile::tempdir().unwrap();
+    let platform = Arc::new(FakePlatform::default());
+    let (_package_data, package_dirs) = data_dir();
+    let mut harness = harness_with_options(&package_dirs, Arc::new(|| {}), |options| {
+        options.platform = platform.clone();
+        options.licences = Some(licences.path().to_path_buf());
+    });
+    click(&mut harness, "Settings");
+    assert!(harness.query_by_label(LICENCES_SHIP).is_some());
+    let button = harness.get_by_role_and_label(Role::Button, OPEN_LICENCES);
+    // Below the window's bottom edge, at the end of the cards: pressed as a screen
+    // reader does.
+    button.click_accesskit();
+    harness.step();
+    let deadline = Instant::now() + TIMEOUT;
+    while platform.revealed.lock().unwrap().is_empty() {
+        assert!(
+            Instant::now() < deadline,
+            "the licences folder was never shown"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(
+        *platform.revealed.lock().unwrap(),
+        [licences.path().to_path_buf()]
+    );
+}
+
 #[test]
 fn settings_render_at_the_smallest_window() {
     let (_data, dirs) = data_dir();
@@ -3814,13 +3860,15 @@ fn run_until_downloading(harness: &mut Harness<'static, App>) {
     harness.step();
 }
 
-/// Draws frames until the default model is installed, and its row says so.
+/// Draws frames until the default model is installed and idle, and its row says so. The
+/// model's file is in place a moment before the engine ends the download or the import: a
+/// read of the models made in between shows the model installed and still busy, and its
+/// row then shows the download, not `Delete`.
 fn run_until_installed(harness: &mut Harness<'static, App>) {
     run_until(harness, "the model installed", |app| {
-        app.controller()
-            .models()
-            .iter()
-            .any(|view| view.spec.id == "dinov2-small" && view.installed)
+        app.controller().models().iter().any(|view| {
+            view.spec.id == "dinov2-small" && view.installed && view.activity == ModelActivity::Idle
+        })
     });
     harness.step();
 }
@@ -3902,6 +3950,87 @@ fn turning_the_switch_on_downloads_nothing() {
         "a choice or a job downloaded something"
     );
     assert!(harness.state().controller().question().is_none());
+}
+
+/// Draws frames, 5 ms apart, until a text painted is `text`, whole.
+fn run_until_painted_whole(harness: &mut Harness<'static, App>, text: &str) {
+    let deadline = Instant::now() + TIMEOUT;
+    while !painted_texts(harness).iter().any(|painted| painted == text) {
+        assert!(
+            Instant::now() < deadline,
+            "{text:?} was never painted whole"
+        );
+        thread::sleep(Duration::from_millis(5));
+        harness.step();
+    }
+}
+
+/// Whether anything on screen, painted or named, says that ONNX Runtime is missing.
+fn says_missing(harness: &Harness<'static, App>) -> bool {
+    ["not found", "is missing"]
+        .iter()
+        .any(|words| painted(harness, words) || harness.query_by_label_contains(words).is_some())
+}
+
+/// A library that needs a newer macOS is said in one sentence wherever the app says that
+/// ONNX Runtime is missing: on hover the ML chip (before what it does) and the status bar,
+/// which keep their words, the new-job form and the models' card; never as missing.
+#[test]
+fn a_library_that_needs_a_newer_macos_says_so() {
+    let (_data, dirs) = data_dir();
+    let mut harness = harness_with_options(&dirs, Arc::new(|| {}), |options| {
+        options.runtime = runtime_needing_macos();
+    });
+    assert!(chip(&harness, "ML unavailable"));
+    let status = harness.query_by_role_and_label(Role::Label, "ML unavailable");
+    assert!(status.is_some());
+    if !cfg!(feature = "ml") {
+        // A build without the visual check has no library to need anything.
+        assert!(harness.query_by_label_contains("macOS").is_none());
+        return;
+    }
+    assert!(!painted(&harness, NEEDS_MACOS));
+
+    // The chip's hover, then the status bar's.
+    harness
+        .get_by_role_and_label(Role::Button, "ML unavailable")
+        .hover();
+    run_until_painted_whole(
+        &mut harness,
+        &format!("{NEEDS_MACOS}\nThe visual check of new jobs: open its settings"),
+    );
+    harness
+        .get_by_role_and_label(Role::Label, "ML unavailable")
+        .hover();
+    run_until_painted_whole(&mut harness, NEEDS_MACOS);
+    assert!(!says_missing(&harness));
+    // Away from both, it goes.
+    harness.get_by_label("New job").hover();
+    let deadline = Instant::now() + TIMEOUT;
+    while painted(&harness, NEEDS_MACOS) {
+        assert!(Instant::now() < deadline, "the status bar's hover stayed");
+        harness.step();
+    }
+
+    // The new-job form says it in place of its sentence.
+    harness.state_mut().controller_mut().open_new_job(None);
+    harness.step();
+    harness.get_by_label(NEEDS_MACOS).scroll_to_me();
+    for _ in 0..4 {
+        harness.step();
+    }
+    assert!(painted(&harness, NEEDS_MACOS));
+    assert!(!says_missing(&harness));
+    click(&mut harness, "Cancel new job");
+
+    // So does the models' card, after its warning icon.
+    open_the_models(&mut harness);
+    harness.get_by_label(NEEDS_MACOS).scroll_to_me();
+    for _ in 0..4 {
+        harness.step();
+    }
+    assert!(painted(&harness, NEEDS_MACOS));
+    assert!(!says_missing(&harness));
 }
 
 #[test]
@@ -4124,9 +4253,13 @@ fn run_until_done(harness: &mut Harness<'static, App>, input: &Path, job: JobId)
     });
 }
 
-/// The files directly in `folder`, in order.
+/// The files directly in `folder`, in order, under its canonical path, as the engine
+/// records the stacks it writes: on Windows a canonical path has the verbatim prefix
+/// `\\?\`, and on macOS the temporary folder is reached through a link.
 fn paths_in(folder: &Path) -> Vec<PathBuf> {
-    files_in(folder).into_keys().collect()
+    files_in(&folder.canonicalize().unwrap())
+        .into_keys()
+        .collect()
 }
 
 #[test]
@@ -4343,13 +4476,18 @@ fn every_screen_renders_in_both_themes_at_the_smallest_window() {
         }
         let (_data, _prepared, (open, controller), waker) =
             screens::start(screen).unwrap_or_else(|error| panic!("{error}"));
-        let mut harness = Harness::builder()
-            .with_size(size)
-            .build_eframe(move |creation| {
-                waker.attach(&creation.egui_ctx);
-                let app = (screen.setup)(&creation.egui_ctx, controller);
-                Shown { _open: open, app }
-            });
+        let mut builder = Harness::builder().with_size(size);
+        // Its names are in scripts the app's fonts lack. The window takes them from the
+        // system's fonts; the harness looks for none, so its layout is the same on every
+        // machine, and draws boxes instead.
+        if screen.name == "names" {
+            builder = builder.allow_missing_glyphs();
+        }
+        let mut harness = builder.build_eframe(move |creation| {
+            waker.attach(&creation.egui_ctx);
+            let app = (screen.setup)(&creation.egui_ctx, controller);
+            Shown { _open: open, app }
+        });
         for theme in [egui::Theme::Dark, egui::Theme::Light] {
             harness.ctx.set_theme(theme);
             for _ in 0..FRAMES {

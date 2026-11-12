@@ -36,7 +36,7 @@ use form::Submissions;
 pub use form::{Field, JobForm};
 use jobs::Jobs;
 use models::Models;
-pub use models::{MlState, ModelFailure, RuntimeCheck};
+pub use models::{LibraryProblem, MlState, ModelFailure, OsVersion, RuntimeCheck};
 pub use reveal::{REVEAL_THREAD, Reveal, reveal_in_the_background};
 use review::Thresholds;
 pub use review::{ResultCounts, Review, Selection, WriteCounts, shows_results};
@@ -52,8 +52,12 @@ pub struct StartOptions {
     pub embedder: Option<Arc<dyn EmbedSource>>,
     /// What installs the models instead of the downloader: for tests.
     pub installer: Option<Arc<dyn ModelInstall>>,
-    /// Where ONNX Runtime was looked for, and whether it is there.
+    /// Where ONNX Runtime was looked for, and what keeps it from loading, if anything.
     pub runtime: RuntimeCheck,
+    /// The folder of the licence texts the package ships
+    /// ([`crate::platform::licences_folder`]), looked for before the first frame; `None`
+    /// where there is none, as in a development build: the About card then offers none.
+    pub licences: Option<PathBuf>,
 }
 
 /// Why the app cannot start.
@@ -64,7 +68,12 @@ pub enum StartError {
     /// Another Photostacker, this app or the CLI, is using the database at this path.
     AlreadyRunning(PathBuf),
     /// The engine cannot start on the database at `db`: it cannot be locked or opened.
-    Engine { db: PathBuf, error: EngineError },
+    /// The error is boxed, to keep the `Result` of [`Controller::start`] small on every
+    /// system.
+    Engine {
+        db: PathBuf,
+        error: Box<EngineError>,
+    },
     /// A folder of the app's data cannot be created, so the database at `db` is never
     /// opened.
     Io { db: PathBuf, error: io::Error },
@@ -109,7 +118,7 @@ impl fmt::Display for StartError {
 impl std::error::Error for StartError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            StartError::Engine { error, .. } => Some(error),
+            StartError::Engine { error, .. } => Some(error.as_ref()),
             StartError::Io { error, .. } | StartError::Thread(error) => Some(error),
             StartError::NoAppDirs | StartError::AlreadyRunning(_) => None,
         }
@@ -218,6 +227,8 @@ pub struct Controller {
     thumbs_dir: PathBuf,
     /// The folder of the app's log files ([`AppDirs::logs`]).
     logs_dir: PathBuf,
+    /// The folder of the package's licence texts, if it has one.
+    licences_dir: Option<PathBuf>,
     jobs: Jobs,
     /// The selected job's review, once its analysis is saved.
     review: Option<Review>,
@@ -257,6 +268,7 @@ impl Controller {
             embedder,
             installer,
             runtime,
+            licences,
         } = options;
         let db = dirs.db();
         let io = |error| StartError::Io {
@@ -278,7 +290,7 @@ impl Controller {
             EngineError::Busy(db) => StartError::AlreadyRunning(db),
             error => StartError::Engine {
                 db: db.clone(),
-                error,
+                error: Box::new(error),
             },
         })?;
         let prefs = Prefs::load(&engine);
@@ -295,6 +307,7 @@ impl Controller {
             wake,
             thumbs_dir: dirs.thumbs(),
             logs_dir: dirs.logs(),
+            licences_dir: licences,
             jobs: Jobs::default(),
             review: None,
             pending_thresholds: HashMap::new(),
@@ -471,7 +484,7 @@ impl Controller {
                 self.follow_the_selection();
             }
             Reply::Files { job, files } => self.files_read(job, files),
-            Reply::Review { job, review } => self.review_read(job, review),
+            Reply::Review { job, review } => self.review_read(job, *review),
             // The form's own, by its token; any other is for whoever submitted it.
             Reply::Submitted { token, result } => match self.take_submission(token) {
                 Some(submission) => self.form_answered(submission, result),

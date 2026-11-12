@@ -11,7 +11,7 @@ use photostacker_ui::{
     failed_start::FailedStart,
     identity::{APP_ID, APP_NAME, window_icon},
     logging,
-    platform::Native,
+    platform::{self, Native},
     renderer::native_options,
     wake::Waker,
 };
@@ -37,8 +37,11 @@ fn main() -> eframe::Result {
             platform: Arc::new(Native),
             embedder: None,
             installer: None,
-            // Looked for once, before the first frame: the UI thread reads no file after.
+            // Looked for once, before the first frame: the app reads no file on the UI
+            // thread after (the rule and its exceptions: crates/ui/DESIGN.md, State and
+            // the engine).
             runtime: RuntimeCheck::look(),
+            licences: platform::licences_folder(),
         })
     });
     if let Err(error) = &started {

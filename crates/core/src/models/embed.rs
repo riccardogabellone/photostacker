@@ -6,11 +6,9 @@
 //! 0..1, normalised with the ImageNet mean and std, as CHW float32; the
 //! embedding is the CLS token of `last_hidden_state`, L2-normalised.
 
-use std::env;
-use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
 use std::fs::File;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Mutex, OnceLock, PoisonError};
 
 use image::RgbImage;
@@ -20,6 +18,7 @@ use ort::session::Session;
 use ort::value::Tensor;
 
 use super::install::hash_copy;
+use super::runtime::{environment_library, library_problem};
 use super::{ModelError, ModelSpec};
 use crate::guard;
 
@@ -48,7 +47,7 @@ impl Embedder {
     /// Loads the model file at `path` as the model `spec`. The file must be
     /// the registry's (its SHA-256 is checked first, else
     /// [`ModelError::HashMismatch`]). ONNX Runtime missing or failing to
-    /// load ([`library_path`]), or refusing the model, gives
+    /// load ([`environment_library`]), or refusing the model, gives
     /// [`ModelError::Runtime`].
     pub fn load(spec: &ModelSpec, path: &Path) -> Result<Embedder, ModelError> {
         let actual = hash_copy(File::open(path)?, io::sink())?;
@@ -164,39 +163,25 @@ fn session(environment: &Environment, path: &Path) -> ort::Result<Session> {
     Session::builder(environment)?.commit_from_file(path)
 }
 
-/// Where ONNX Runtime's shared library is loaded from: `ORT_DYLIB_PATH` when
-/// set, else the platform's file name (`libonnxruntime.so`,
-/// `onnxruntime.dll`, `libonnxruntime.dylib`) beside the executable, where
-/// every package ships it (spec §8.3).
-pub fn library_path() -> PathBuf {
-    if let Some(path) = env::var_os("ORT_DYLIB_PATH").filter(|path| !path.is_empty()) {
-        return PathBuf::from(path);
-    }
-    let name = format!("{DLL_PREFIX}onnxruntime{DLL_SUFFIX}");
-    env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(|folder| folder.join(&name)))
-        .unwrap_or_else(|| PathBuf::from(name))
-}
-
 /// The process's one ONNX Runtime environment (ort allows no second), made
-/// on first use from [`library_path`]. A failure is kept too: the library
-/// is looked for once per run.
-fn environment() -> Result<Environment, ModelError> {
+/// on first use from [`environment_library`]. A failure is kept too: the
+/// library is looked for once per run.
+pub(super) fn environment() -> Result<Environment, ModelError> {
     static ENVIRONMENT: OnceLock<Result<Environment, String>> = OnceLock::new();
     ENVIRONMENT
-        .get_or_init(|| create_environment(&library_path()))
+        .get_or_init(|| create_environment(environment_library()))
         .clone()
         .map_err(ModelError::Runtime)
 }
 
 /// Loads ONNX Runtime from `library` and makes the environment, with
-/// telemetry off. A missing or unloadable library is an error, never a
-/// panic: ort reports a failed load as an error, and a panic inside it is
-/// caught as a backstop.
+/// telemetry off. A library that [`library_problem`] refuses (missing, or
+/// needing a newer macOS) is not loaded; one that fails to load is an error
+/// too, never a panic: ort reports a failed load as an error, and a panic
+/// inside it is caught as a backstop.
 fn create_environment(library: &Path) -> Result<Environment, String> {
-    if !library.is_file() {
-        return Err(format!("ONNX Runtime not found at {}", library.display()));
+    if let Some(problem) = library_problem(library) {
+        return Err(problem.refusal(library));
     }
     let created = guard::catch(|| {
         ort::init_from(library)
@@ -210,7 +195,7 @@ fn create_environment(library: &Path) -> Result<Environment, String> {
         Ok(result) => result,
         Err(panic) => Err(format!(
             "ONNX Runtime at {} failed to load: {panic}",
-            library.display()
+            crate::fsio::display_path(library)
         )),
     }
 }
@@ -284,7 +269,7 @@ mod tests {
     /// Whether ONNX Runtime's library is there to run models; without it a
     /// test that needs it prints why it is skipped.
     fn onnx_runtime_present() -> bool {
-        let library = library_path();
+        let library = environment_library();
         let present = library.is_file();
         if !present {
             println!("skipped: ONNX Runtime not found at {}", library.display());
@@ -539,6 +524,58 @@ mod tests {
     fn l2_normalisation_keeps_a_zero_vector_zero() {
         assert_eq!(l2_normalised(&[3.0, 0.0, -4.0]), [0.6, 0.0, -0.8]);
         assert_eq!(l2_normalised(&[0.0; 3]), [0.0; 3]);
+    }
+
+    /// The table of pinned ONNX Runtime builds that the scripts fetch (spec
+    /// §8.3): every row must be one this build can load. `ort`'s `api-17`
+    /// feature asks for ONNX Runtime 1.17 or later.
+    #[test]
+    fn the_pinned_onnx_runtimes_can_be_loaded_by_this_build() {
+        let table = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/onnxruntime.tsv");
+        let text = fs::read_to_string(&table)
+            .unwrap_or_else(|error| panic!("{}: {error}", table.display()));
+        // The scripts split each line on tabs alone: a carriage return would end up in the
+        // last column, the library's path.
+        assert!(
+            !text.contains('\r'),
+            "{} holds a carriage return: save it with LF line endings",
+            table.display()
+        );
+        let rows: Vec<Vec<&str>> = text
+            .lines()
+            .filter(|line| !line.trim().is_empty() && !line.starts_with('#'))
+            .map(|line| line.split('\t').collect())
+            .collect();
+        assert!(!rows.is_empty(), "{} pins nothing", table.display());
+
+        let mut systems = Vec::new();
+        for row in &rows {
+            let [os, arch, version, archive, sha256, _library] = row[..] else {
+                panic!("not six tab-separated columns: {row:?}");
+            };
+            assert!(
+                sha256.len() == 64
+                    && sha256
+                        .chars()
+                        .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)),
+                "not 64 lowercase hex digits: {sha256}"
+            );
+            assert!(archive.contains(version), "{archive} is not {version}");
+            let numbers: Vec<u32> = version
+                .split('.')
+                .map(|n| {
+                    n.parse()
+                        .unwrap_or_else(|error| panic!("version {version:?}: {n:?}: {error}"))
+                })
+                .collect();
+            assert!(
+                numbers.len() == 3 && (numbers[0], numbers[1]) >= (1, 17),
+                "{version} is older than 1.17"
+            );
+            // The scripts take the first row of a system: a second is never used.
+            assert!(!systems.contains(&(os, arch)), "{os} {arch} twice");
+            systems.push((os, arch));
+        }
     }
 
     #[test]

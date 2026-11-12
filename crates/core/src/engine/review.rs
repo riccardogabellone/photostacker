@@ -22,6 +22,7 @@ use super::{Engine, EngineError, EngineEvent, GroupId, JobId, Shared, lock};
 use crate::analyze::{ExamCache, FileRecord, examine_active, read_passive, relative_to};
 use crate::discover::DiscoveredFile;
 use crate::exif::ExifData;
+use crate::fsio::display_path;
 use crate::group::{
     ExistingGroup, FileFacts, ManualGroup, RegroupInput, Regrouped, Thresholds,
     max_pairwise_distance, order_layers, regroup,
@@ -313,7 +314,7 @@ impl Shared {
 /// the app shows a refusal as a sentence, with its first letter capitalised, which would
 /// misquote the file's name.
 fn photo_name(path: &Path, input: &Path) -> String {
-    relative_to(input, path).display().to_string()
+    display_path(&relative_to(input, path))
 }
 
 /// `Ok` when a job in `status` is in review.

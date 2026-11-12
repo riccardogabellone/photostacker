@@ -169,7 +169,9 @@ fn fonts() -> FontDefinitions {
     weighted("inter", REGULAR);
     weighted(SEMIBOLD_FAMILY, SEMIBOLD);
 
-    // egui's own fonts stay behind Inter as fallbacks (symbols, emoji).
+    // egui's own fonts stay behind Inter as fallbacks (symbols, emoji). The system's fonts
+    // come after every font named here: eframe's `system_fonts` appends one to a family
+    // only for a character none of these has.
     let fallbacks = fonts.families[&FontFamily::Proportional].clone();
     fonts
         .families

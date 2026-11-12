@@ -1,0 +1,21 @@
+# Settings for every build of the workspace, whatever the host has installed.
+# Each [env] entry gives way to a value already in the environment.
+
+[env]
+# libheif is built by cmake (through libheif-sys), which links every codec
+# library it finds on the build host. The toolchain file hides all of them but
+# libde265, so the app links the same codecs wherever it is built; see the
+# file for how to keep it complete.
+CMAKE_TOOLCHAIN_FILE = { value = "packaging/cmake/libheif.cmake", relative = true }
+
+# The bundled SQLite is compiled with the option that makes all of the
+# process's connections share one page cache: the store's cache sizes rely on
+# it (spec §4.3). rusqlite's `bundled` feature set it itself up to 0.40; since
+# 0.41 the project sets it here. A build that sets LIBSQLITE3_FLAGS itself must
+# include this option; the test `the_bundled_sqlite_shares_one_page_cache`
+# fails without it.
+LIBSQLITE3_FLAGS = "-DSQLITE_ENABLE_MEMORY_MANAGEMENT"
+
+# The oldest macOS the app runs on. rustc, the `cc` crate and cmake read it
+# when they build for macOS; every other target ignores it.
+MACOSX_DEPLOYMENT_TARGET = "11.0"

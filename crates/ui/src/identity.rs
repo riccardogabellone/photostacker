@@ -79,4 +79,67 @@ mod tests {
         assert_eq!(field("StartupWMClass"), APP_ID);
         assert_eq!(field("Exec"), BINARY_NAME);
     }
+
+    /// A file of the repository, read as text.
+    fn repository_file(relative: &str) -> String {
+        let path = format!("{}/../../{relative}", env!("CARGO_MANIFEST_DIR"));
+        std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{path}: {error}"))
+    }
+
+    /// The text between `open` and `close` on the first line of `text` that holds both.
+    fn between<'a>(text: &'a str, open: &str, close: &str) -> Option<&'a str> {
+        text.lines().find_map(|line| {
+            let (_, rest) = line.split_once(open)?;
+            Some(rest.split_once(close)?.0)
+        })
+    }
+
+    #[test]
+    fn the_appstream_file_names_the_app_id_and_its_desktop_entry() {
+        // Reading the file by the ID's name also checks that the file is named after it.
+        let metainfo = repository_file(&format!("packaging/linux/{APP_ID}.metainfo.xml"));
+        assert_eq!(between(&metainfo, "<id>", "</id>"), Some(APP_ID));
+        assert_eq!(between(&metainfo, "<name>", "</name>"), Some(APP_NAME));
+        let desktop_entry = format!("{APP_ID}.desktop");
+        assert_eq!(
+            between(
+                &metainfo,
+                r#"<launchable type="desktop-id">"#,
+                "</launchable>"
+            ),
+            Some(desktop_entry.as_str())
+        );
+    }
+
+    #[test]
+    fn the_packages_carry_the_app_s_name_id_and_executable() {
+        let manifest = repository_file("crates/ui/Cargo.toml");
+        // The packager's own table: from its header to the next table's.
+        let (_, packager) = manifest
+            .split_once("\n[package.metadata.packager]\n")
+            .expect("crates/ui/Cargo.toml has a [package.metadata.packager] table");
+        let packager = packager.split("\n[").next().unwrap();
+        let value = |key: &str| {
+            packager.lines().find_map(|line| {
+                let rest = line.strip_prefix(key)?.strip_prefix(" = \"")?;
+                Some(rest.split_once('"')?.0)
+            })
+        };
+        assert_eq!(value("identifier"), Some(APP_ID));
+        assert_eq!(value("product-name"), Some(APP_NAME));
+        let main_binary = packager
+            .lines()
+            .find(|line| line.contains("main = true"))
+            .and_then(|line| between(line, "path = \"", "\""));
+        assert_eq!(main_binary, Some(BINARY_NAME));
+
+        // The AppImage tooling looks for the desktop entry under the main binary's name.
+        let appimage_entry = format!(
+            r#""../../packaging/linux/{APP_ID}.desktop" = "usr/share/applications/{BINARY_NAME}.desktop""#
+        );
+        assert!(
+            manifest.lines().any(|line| line == appimage_entry),
+            "the AppImage's files map the desktop entry to {BINARY_NAME}.desktop"
+        );
+    }
 }

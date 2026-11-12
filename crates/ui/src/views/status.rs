@@ -9,7 +9,7 @@ use photostacker_core::engine::JobView;
 use photostacker_core::model::JobStatus;
 
 use crate::controller::Controller;
-use crate::format::{count, job_totals, ml_state_text, percent};
+use crate::format::{count, job_totals, ml_state_text, needs_macos_text, percent};
 use crate::theme;
 
 /// Draws the status bar, one text row high. The right side gives way to the left: a long
@@ -33,9 +33,13 @@ pub fn show(ui: &mut egui::Ui, controller: &Controller) {
             ui.label(totals(job, unstacked));
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            // The toolbar chip's words, as text: the bar's one fixed item, at its end.
-            let ml = ml_state_text(&controller.ml_state());
-            ui.label(RichText::new(ml).color(palette.secondary));
+            // The toolbar chip's words, as text: the bar's one fixed item, at its end. Why
+            // the check cannot run shows on hover when the library needs a newer macOS.
+            let state = controller.ml_state();
+            let ml = ui.label(RichText::new(ml_state_text(&state)).color(palette.secondary));
+            if let Some(why) = needs_macos_text(&state) {
+                ml.on_hover_text(why);
+            }
             // Once the engine has stopped, nothing runs: the centre says so, and the last
             // progress it sent is no activity.
             let Some(text) = activity(controller).filter(|_| controller.engine_stopped().is_none())

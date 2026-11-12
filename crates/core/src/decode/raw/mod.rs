@@ -274,12 +274,12 @@ mod tests {
         assert!(!RAW_EXTENSIONS.contains(&"x3f"));
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_raw_truncated_after_it_is_opened_cannot_fault() {
         // A card pulled during a scan: the file shrinks under rawler's source.
-        // Reading a mapped page past the new end would raise SIGBUS and end
-        // the test process; bytes on the heap stay as they were read.
+        // Reading a mapped page past the new end would raise SIGBUS on Unix
+        // and end the test process (Windows refuses to truncate a mapped
+        // file at all); bytes on the heap stay as they were read.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("unknown.nef");
         let original = photostacker_testkit::tiff_raw_with_jpegs(&[(160, 120), (1024, 683)]);
@@ -295,7 +295,6 @@ mod tests {
         assert!(source.buf() == original.as_slice());
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_raw_over_the_budget_is_refused_unread() {
         // Sparse, so neither disk space nor memory is used; a read of it
@@ -303,7 +302,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("huge.nef");
         let len = crate::budget::DECODE_MEMORY_BUDGET + 1;
-        fs::File::create(&path).unwrap().set_len(len).unwrap();
+        photostacker_testkit::sparse_file(&path, len).unwrap();
         let too_large = |err: &DecodeError| match err {
             DecodeError::Unsupported(why) => why.contains("too large to decode"),
             _ => false,

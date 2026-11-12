@@ -503,11 +503,11 @@ mod tests {
         jpeg_exif(Cursor::new(data))
     }
 
-    #[cfg(unix)]
     #[test]
     fn exif_read_survives_the_file_being_truncated() {
         // A card pulled during a scan: the file shrinks after it was read.
-        // A mapped page past the new end would raise SIGBUS when read.
+        // A mapped page past the new end would raise SIGBUS when read on
+        // Unix; Windows refuses to truncate a mapped file at all.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("x.tif");
         let tiff = photostacker_testkit::TiffSpec {
@@ -544,7 +544,7 @@ mod tests {
         let path = dir.path().join("huge.tif");
         let len = crate::budget::DECODE_MEMORY_BUDGET + 1;
         // Sparse: no disk space and no memory is used.
-        File::create(&path).unwrap().set_len(len).unwrap();
+        photostacker_testkit::sparse_file(&path, len).unwrap();
         let err = read_file(&path).unwrap_err();
         assert!(
             matches!(err, ExifError::TooLarge { len: l } if l == len),

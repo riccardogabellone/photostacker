@@ -6,16 +6,14 @@
 set dotenv-load
 
 # Microsoft's ONNX Runtime, which the embedder loads at run time (spec §8.3). `just ort`
-# fetches the Linux x64 build; elsewhere set ORT_DYLIB_PATH, or put the library beside
-# the executable.
-ort_version := "1.31.1"
-ort_dir := cache_directory() / "onnxruntime" / ort_version
-ort_sha256 := "c849e36a1ef3e22d4ff217b9d1ce4a3cf5b9467b975610913ae959ad5b16bdc9"
-ort_folder := "onnxruntime-linux-x64-" + ort_version
-ort_library := ort_dir / ort_folder / "lib/libonnxruntime.so"
-# A developer's own ORT_DYLIB_PATH is kept. Without one, Linux gets the library of
-# `just ort`, and other systems none (empty counts as unset).
-export ORT_DYLIB_PATH := env_var_or_default('ORT_DYLIB_PATH', if os() == "linux" { ort_library } else { "" })
+# fetches the build that scripts/onnxruntime.tsv pins for this system: Linux x64, macOS on
+# Apple silicon or Intel, and Windows x64 under Git Bash, where scripts/win.ps1 fetches the
+# same build. On a system with no pinned build, set ORT_DYLIB_PATH, or put the library
+# beside the executable.
+# A developer's own ORT_DYLIB_PATH is kept (empty counts as unset). Without one, it is the
+# library of `just ort`, whether installed yet or not, and nothing on a system with no
+# pinned build. `scripts/ort.sh --where` only names the path: it downloads nothing.
+export ORT_DYLIB_PATH := if env('ORT_DYLIB_PATH', '') != '' { env('ORT_DYLIB_PATH') } else { `scripts/ort.sh --where` }
 
 # Pass recipe arguments through as "$@", so quoted filters like -E 'test(model::)' survive.
 set positional-arguments
@@ -39,11 +37,33 @@ clippy:
 test *ARGS:
     cargo nextest run --workspace "$@"
 
+# Not part of `check`: it downloads the advisory database, and `check` works offline.
+# Check the dependencies' licences, advisories, bans and sources against deny.toml (spec §11.2).
+deny:
+    cargo deny check
+
+# scripts/licences.sh runs cargo-about (`cargo install cargo-about --version 0.9.3 --locked --features cli`), which reads
+# about.toml and the template in packaging/licenses. It needs the network: it fetches from GitHub the
+# licence files that some crates leave out of their package (about.toml's `git` clarifications). Not
+# part of `check`. scripts/package.sh runs the same script.
+# Write the licences of the Rust crates the packages ship, with their texts, to dist/package/resources/licenses/THIRD-PARTY-LICENSES.md (spec §11.3).
+licences:
+    scripts/licences.sh
+
+# scripts/package.sh: needs cargo-packager 0.11.8 (`cargo install cargo-packager --version 0.11.8 --locked`), cargo-about and the network. It empties dist/package and dist/packages first.
+# Build this system's packages into dist/packages: deb,appimage on Linux, nsis,wix on Windows, dmg on macOS (packaging/README.md).
+package FORMATS:
+    scripts/package.sh "$1"
+
+# Check built packages before anyone installs them: what they hold, what they link, and a run of the command-line tool from each; --install really installs the .deb and the NSIS installer, for a throwaway machine only (packaging/README.md).
+smoke *ARGS:
+    scripts/smoke.sh "$@"
+
 # Run the desktop app in release mode; arguments go to the binary.
 run *ARGS:
     cargo run --release -p photostacker-ui -- "$@"
 
-# Run the photostacker CLI in release mode; arguments go to the binary.
+# Run the command-line tool, photostacker-cli, in release mode; arguments go to the binary.
 run-cli *ARGS:
     cargo run --release -p photostacker-cli -- "$@"
 
@@ -59,25 +79,7 @@ ps-samples *ARGS:
 calibrate-ml *ARGS:
     cargo run --release -p photostacker-core --example calibrate_ml -- "$@"
 
-# Download Microsoft's ONNX Runtime (Linux x64) once into the user's cache folder, verified; a no-op when it is there.
-# It is extracted into a temporary folder and renamed into place whole, so an interrupted run leaves nothing that looks installed.
+# scripts/ort.sh downloads the archive into a temporary folder, checks its SHA-256, unpacks it there, and then renames the build's folder into place whole, so an interrupted run leaves nothing that looks installed.
+# Download Microsoft's ONNX Runtime for this system once into the user's cache folder, verified, and print its library's path; a no-op when it is there.
 ort:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if test -s "{{ort_library}}"; then
-        echo "ONNX Runtime {{ort_version}} is at {{ort_library}}"
-        exit 0
-    fi
-    mkdir -p "{{ort_dir}}"
-    tmp=$(mktemp -d "{{ort_dir}}/.extract.XXXXXX")
-    trap 'rm -rf "$tmp"' EXIT
-    archive="$tmp/{{ort_folder}}.tgz"
-    curl --fail --location --silent --show-error --retry 3 -o "$archive" \
-        "https://github.com/microsoft/onnxruntime/releases/download/v{{ort_version}}/{{ort_folder}}.tgz"
-    echo "{{ort_sha256}}  $archive" | sha256sum --check --quiet
-    tar -xzf "$archive" -C "$tmp"
-    test -s "$tmp/{{ort_folder}}/lib/libonnxruntime.so"
-    # A folder without the library is no install: mv would nest into it.
-    rm -rf "{{ort_dir}}/{{ort_folder}}"
-    mv "$tmp/{{ort_folder}}" "{{ort_dir}}/{{ort_folder}}"
-    echo "ONNX Runtime {{ort_version}} is at {{ort_library}}"
+    @scripts/ort.sh

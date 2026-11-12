@@ -1,11 +1,35 @@
 //! What the app asks of the desktop: the folder and file pickers, and showing a path in
 //! the file manager. Behind a trait, so tests script the answers instead of opening
-//! dialogs.
+//! dialogs. Also where the package keeps its licence texts, which the file manager
+//! shows.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use photostacker_core::package;
+
 use crate::format::openable_path;
+
+/// The folder of a package's licence texts, inside one of its resource folders
+/// (spec §11.3).
+const LICENCES_FOLDER: &str = "licenses";
+
+/// The folder of the licence texts the package ships: the `licenses` folder of the first
+/// of its resource folders ([`package::resource_folders`]) that has one; `None` where
+/// none has one, as in a development build. It reads the file system, so `main` calls it
+/// once, before the first frame.
+pub fn licences_folder() -> Option<PathBuf> {
+    let exe_dir = package::exe_dir()?;
+    first_licences_folder(&package::resource_folders(&exe_dir))
+}
+
+/// The `licenses` folder of the first of `folders` that has one.
+fn first_licences_folder(folders: &[PathBuf]) -> Option<PathBuf> {
+    folders
+        .iter()
+        .map(|folder| folder.join(LICENCES_FOLDER))
+        .find(|licences| licences.is_dir())
+}
 
 /// What a file dialog gave.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -115,6 +139,37 @@ mod tests {
             picked(Some(chosen.clone()), slow, false),
             Picked::Path(chosen)
         );
+    }
+
+    #[test]
+    fn the_licences_folder_is_the_first_resource_folder_that_has_one() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = |name: &str| root.path().join(name);
+        // Without a `licenses` folder; with a file of that name; then two with one.
+        let [bare, with_a_file, packaged, later] =
+            ["bare", "with a file", "packaged", "later"].map(folder);
+        for each in [&bare, &with_a_file, &packaged, &later] {
+            std::fs::create_dir_all(each).unwrap();
+        }
+        std::fs::write(with_a_file.join(LICENCES_FOLDER), b"").unwrap();
+        std::fs::create_dir(packaged.join(LICENCES_FOLDER)).unwrap();
+        std::fs::create_dir(later.join(LICENCES_FOLDER)).unwrap();
+        let missing = folder("never made");
+
+        let folders = [
+            missing,
+            bare.clone(),
+            with_a_file.clone(),
+            packaged.clone(),
+            later,
+        ];
+        assert_eq!(
+            first_licences_folder(&folders),
+            Some(packaged.join(LICENCES_FOLDER))
+        );
+        // A development build: no resource folder has one.
+        assert_eq!(first_licences_folder(&[bare, with_a_file]), None);
+        assert_eq!(first_licences_folder(&[]), None);
     }
 
     #[test]

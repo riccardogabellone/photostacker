@@ -4,9 +4,10 @@
 //! the file manager over D-Bus, and waits out D-Bus's timeout when there is none (WSLg has
 //! none). So it runs neither on the UI thread nor on the backend's, where it would hold up
 //! every engine request queued behind it. Each reveal gets a short-lived thread, which
-//! also looks at the path first (the UI thread touches no file) and reports what went
-//! wrong as a notice, which [`Controller::poll`] takes in. The window of a start that
-//! failed, which has no controller, reveals the same way ([`reveal_in_the_background`]).
+//! also looks at the path first (so the UI thread does not look at it) and reports
+//! what went wrong as a notice, which [`Controller::poll`] takes in. The window of a start
+//! that failed, which has no controller, reveals the same way
+//! ([`reveal_in_the_background`]).
 
 use std::io;
 use std::path::{Path, PathBuf};

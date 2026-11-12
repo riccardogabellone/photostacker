@@ -1,5 +1,5 @@
 //! The plan file, version 1: the proposed groups of an [`Analysis`] as JSON,
-//! for `photostacker run --dry-run --plan` and for regression checks.
+//! for `photostacker-cli run --dry-run --plan` and for regression checks.
 
 use std::path::{Path, PathBuf};
 

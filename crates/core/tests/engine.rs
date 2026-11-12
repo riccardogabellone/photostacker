@@ -471,7 +471,9 @@ fn invalid_config_is_rejected_at_submit() {
     assert_eq!(events.try_recv(), Err(TryRecvError::Empty));
 }
 
-#[cfg(unix)]
+/// Not on macOS, whose file system (APFS) refuses to create a name that is not
+/// valid UTF-8.
+#[cfg(all(unix, not(target_os = "macos")))]
 #[test]
 fn non_utf8_folder_is_refused_at_submit() {
     use std::ffi::OsStr;
@@ -1062,8 +1064,8 @@ fn changed_group_resets_to_proposed_with_the_flag() {
     assert_eq!((a.status, a.review_reset), (GroupStatus::Rejected, false));
 
     // Back at the default, b's members were last in a group nobody decided, but
-    // flagged: the stack that replaces it is still to look at again (ruling
-    // T16-b), until it is decided.
+    // flagged: the stack that replaces it is still to look at again, until it
+    // is decided.
     engine.set_thresholds(job, 8, WINDOW, None).unwrap();
     let shrunk = review.group("b_1.jpg");
     assert_eq!(review.names(&shrunk.members), ["b_1.jpg", "b_2.jpg"]);
@@ -2571,7 +2573,9 @@ impl CrashedWrite {
         CrashedWrite::of(dirs, input, config)
     }
 
-    /// A crashed write whose job writes into `output_dir`.
+    /// A crashed write whose job writes into `output_dir`. Only a test that
+    /// takes a folder's write permission away uses it, so only on Unix.
+    #[cfg(unix)]
     fn writing_into(dirs: &AppDirs, output_dir: PathBuf) -> CrashedWrite {
         let input = review_folder();
         let mut config = JobConfig::new(input.path().to_path_buf());
@@ -3969,7 +3973,7 @@ fn corrupt_installed_model_means_skipped_with_one_warning() {
     let spec = models::model(MODEL).unwrap();
     let file = models::model_file(&dirs.models(), spec);
     fs::create_dir_all(file.parent().unwrap()).unwrap();
-    fs::File::create(&file).unwrap().set_len(spec.size).unwrap();
+    photostacker_testkit::sparse_file(&file, spec.size).unwrap();
     assert!(models::installed(&dirs.models(), spec));
     let input = stage3_folder();
     let review = Review::start(&dirs, ml_config(input.path(), NEAR));
@@ -4565,7 +4569,7 @@ fn poll(what: &str, done: impl Fn() -> bool) {
 fn place_model(models_dir: &Path, spec: &ModelSpec) -> PathBuf {
     let file = models::model_file(models_dir, spec);
     fs::create_dir_all(file.parent().unwrap()).unwrap();
-    fs::File::create(&file).unwrap().set_len(spec.size).unwrap();
+    photostacker_testkit::sparse_file(&file, spec.size).unwrap();
     file
 }
 

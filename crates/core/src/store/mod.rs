@@ -44,17 +44,18 @@ const BUSY_TIMEOUT: Duration = Duration::from_millis(5000);
 /// The page cache of the writer ([`Store::open`]) and of an in-memory
 /// store, in KiB: SQLite's default.
 ///
-/// The bundled SQLite is built with `SQLITE_ENABLE_MEMORY_MANAGEMENT`, so
-/// the page caches of every connection of the process are one pool, as
-/// large as the sum of their sizes (spec §4.3, "What a review edit
-/// costs"). A connection that reaches its own size takes the oldest pages
-/// of the pool, whoever's they are. A connection left with fewer pages
-/// than its own size can then keep none it reads while the pool is full:
-/// it reads every page from the operating system. The writer reads every
-/// embedding at each edit, and vec0 reaches a vector by walking its chunk
-/// of 384 pages from the start, so a writer that cannot keep its pages
-/// makes an edit about 7 times slower. The writer needs no more than this:
-/// it is always at its size, so it takes the pages it needs from the pool.
+/// The bundled SQLite is built with `SQLITE_ENABLE_MEMORY_MANAGEMENT`
+/// (`LIBSQLITE3_FLAGS` in `.cargo/config.toml`), so the page caches of
+/// every connection of the process are one pool, as large as the sum of
+/// their sizes (spec §4.3, "What a review edit costs"). A connection that
+/// reaches its own size takes the oldest pages of the pool, whoever's they
+/// are. A connection left with fewer pages than its own size can then keep
+/// none it reads while the pool is full: it reads every page from the
+/// operating system. The writer reads every embedding at each edit, and
+/// vec0 reaches a vector by walking its chunk of 384 pages from the start,
+/// so a writer that cannot keep its pages makes an edit about 7 times
+/// slower. The writer needs no more than this: it is always at its size,
+/// so it takes the pages it needs from the pool.
 const WRITER_CACHE_KIB: i64 = 2_000;
 
 /// The page cache of a read-only connection ([`Store::open_read_only`]),
@@ -124,7 +125,7 @@ impl Store {
             conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get(0))?;
         if !mode.eq_ignore_ascii_case("wal") {
             // Readers then wait for the writer instead of reading beside it.
-            tracing::warn!(db = %path.display(), mode, "the database cannot use WAL");
+            tracing::warn!(db = %crate::fsio::display_path(path), mode, "the database cannot use WAL");
         }
         Self::migrated(conn)
     }
@@ -279,6 +280,30 @@ mod tests {
         let reader = Store::open_read_only(&path).unwrap();
         assert_eq!(pragma::<i64>(&writer, "cache_size"), -WRITER_CACHE_KIB);
         assert_eq!(pragma::<i64>(&reader, "cache_size"), -READ_ONLY_CACHE_KIB);
+    }
+
+    /// The store's cache sizes assume that every connection of the process
+    /// shares one page cache, which only a SQLite built with
+    /// `SQLITE_ENABLE_MEMORY_MANAGEMENT` does (spec §4.3).
+    #[test]
+    fn the_bundled_sqlite_shares_one_page_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("photostacker.db")).unwrap();
+        let options: Vec<String> = store
+            .conn
+            .prepare("PRAGMA compile_options")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(
+            options.iter().any(|o| o == "ENABLE_MEMORY_MANAGEMENT"),
+            "SQLite was built without SQLITE_ENABLE_MEMORY_MANAGEMENT, so each \
+             connection has a page cache of its own: build it with \
+             LIBSQLITE3_FLAGS=-DSQLITE_ENABLE_MEMORY_MANAGEMENT (see \
+             .cargo/config.toml). Its options: {options:?}"
+        );
     }
 
     #[test]

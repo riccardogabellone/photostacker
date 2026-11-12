@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata: how software centres (GNOME Software, KDE Discover) describe the app. -->
+<component type="desktop-application">
+  <id>io.github.riccardogabellone.Photostacker</id>
+  <name>Photostacker</name>
+  <summary>Stack exposure brackets and bursts as layers in one PSD or TIFF</summary>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <developer id="io.github.riccardogabellone">
+    <name>Riccardo Gabellone</name>
+  </developer>
+  <description>
+    <p>
+      Photostacker finds the series of one shot in a folder of photos (exposure brackets,
+      HDR sets, fast bursts) and stacks each series as layers in one PSD, PSB or layered
+      TIFF, ready for Photoshop or any editor that reads layers.
+    </p>
+    <p>
+      It works offline, only reads your photos, and never writes over a file. It is a
+      desktop app and a command-line tool.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.riccardogabellone.Photostacker.desktop</launchable>
+  <url type="homepage">https://github.com/riccardogabellone/photostacker</url>
+  <url type="bugtracker">https://github.com/riccardogabellone/photostacker/issues</url>
+  <categories>
+    <category>Graphics</category>
+    <category>Photography</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+</component>

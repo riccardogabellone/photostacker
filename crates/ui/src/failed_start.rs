@@ -224,7 +224,9 @@ mod tests {
         // The error names the path (SQLite's words do): the sentence leaves it out.
         let named = StartError::Engine {
             db: db.clone(),
-            error: EngineError::Invalid(format!("unable to open database file: {shown}")),
+            error: Box::new(EngineError::Invalid(format!(
+                "unable to open database file: {shown}"
+            ))),
         };
         assert_eq!(
             failed_start_text(&named),
@@ -244,7 +246,7 @@ mod tests {
         // An error that ends a sentence already gets no second full stop.
         let stopped = StartError::Engine {
             db,
-            error: EngineError::Invalid("the disk is full.".into()),
+            error: Box::new(EngineError::Invalid("the disk is full.".into())),
         };
         assert_eq!(
             failed_start_text(&stopped),

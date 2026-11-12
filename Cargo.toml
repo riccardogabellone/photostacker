@@ -47,9 +47,9 @@ ctrlc = "3"
 
 # Store
 # SQLite compiled in, so no system library is needed.
-rusqlite = { version = "0.40", features = ["bundled"] }
-# 2.6 requires rusqlite 0.40, which is why rusqlite is not 0.41.
-rusqlite_migration = "2.6"
+rusqlite = { version = "0.41", features = ["bundled"] }
+# Each release requires one rusqlite: 2.7 requires 0.41, so the two move together.
+rusqlite_migration = "2.7"
 # The vec0 virtual tables of the embeddings, registered as an auto extension.
 sqlite-vec = "0.1.9"
 # The per-platform app data and cache folders.
@@ -61,9 +61,15 @@ ureq = "3.5"
 # Verifies a downloaded or imported model file.
 sha2 = "0.11"
 # The embedder: ONNX Runtime on the CPU, loaded at run time from Microsoft's
-# official shared library beside the executable (spec §8.3); nothing links it
-# at build time. No ndarray: tensors are (shape, Vec<f32>).
+# official shared library, beside the executable or in the package (spec
+# §8.3); nothing links it at build time. No ndarray: tensors are (shape,
+# Vec<f32>).
 ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "load-dynamic", "api-17"] }
+# Reads the version of the ONNX Runtime library ort has loaded, through a
+# second handle to it (`models::runtime::loaded_version`); ort keeps its own
+# handle private. The version ort itself uses, so it adds no copy to the
+# tree (the UI's graphics stack brings an older copy of its own).
+libloading = "0.9"
 
 # UI (crates/ui). One egui version for every egui crate (crates/ui/DESIGN.md).
 # Members pick the renderer and platform features (crates/ui/Cargo.toml).

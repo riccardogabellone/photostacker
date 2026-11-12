@@ -39,7 +39,10 @@ use photostacker_testkit::{Value, expose, jpeg_with_exif, scene, shift};
 use photostacker_ui::{
     app::App,
     backend::Request,
-    controller::{Controller, Question, Review, RuntimeCheck, StartError, StartOptions},
+    controller::{
+        Controller, LibraryProblem, OsVersion, Question, Review, RuntimeCheck, StartError,
+        StartOptions,
+    },
     failed_start::FailedStart,
     platform::Native,
     views::photo::DraggedPhoto,
@@ -58,8 +61,8 @@ const BROKEN_FILES: usize = 2;
 /// whose scan `hold` keeps in mid-run, the folder of a job to review through the
 /// controller's commands, a job to write, whose write `hold` may keep in mid-run,
 /// Stage 3's embeddings instead of a model, what installs the models instead of the
-/// network, whether ONNX Runtime is missing, and a model to download before the window
-/// opens.
+/// network, what keeps ONNX Runtime from loading, if anything, and a model to download
+/// before the window opens.
 #[derive(Default)]
 pub struct Prepared {
     _folders: Vec<TempDir>,
@@ -74,9 +77,10 @@ pub struct Prepared {
     write: Option<Write>,
     embedder: Option<Arc<dyn EmbedSource>>,
     installer: Option<Arc<dyn ModelInstall>>,
-    /// ONNX Runtime is missing; otherwise it is found. Either way at a made-up path, so no
-    /// screen depends on this machine's library.
-    no_runtime: bool,
+    /// Where ONNX Runtime is and what keeps it from loading (missing, or needing a newer
+    /// macOS); `None` when it is found at [`RUNTIME_PATH`]. Either way at a made-up path,
+    /// so no screen depends on this machine's library.
+    runtime: Option<RuntimeCheck>,
     /// A model to download through the controller, until its download is held or has
     /// failed.
     download: Option<&'static str>,
@@ -266,11 +270,24 @@ pub const SCREENS: &[Screen] = &[
         prepare: no_stacks,
         setup: app,
     },
+    // A job in review on a folder named in Japanese, its one stack selected: a bracket of
+    // eight photos named in eight languages, most of them in scripts Inter does not have.
+    Screen {
+        name: "names",
+        prepare: named_in_other_scripts,
+        setup: inspecting_the_named_stack,
+    },
     // The `jobs` screen with Settings open, the defaults of new jobs changed.
     Screen {
         name: "settings",
         prepare: three_jobs,
         setup: settings,
+    },
+    // Settings scrolled to their end: the About card, with the way to the licence texts.
+    Screen {
+        name: "about",
+        prepare: three_jobs,
+        setup: settings_at_the_end,
     },
     // Settings with the visual check on: its default model being downloaded, held at
     // 43 %, the other one installed.
@@ -286,10 +303,23 @@ pub const SCREENS: &[Screen] = &[
         prepare: models_failed,
         setup: models_settings,
     },
+    // Settings with the visual check on, on a Mac whose ONNX Runtime needs macOS 14.0
+    // while it runs macOS 13.6; no model installed.
+    Screen {
+        name: "needs-macos",
+        prepare: models_needing_macos,
+        setup: models_settings,
+    },
 ];
 
 /// Where the screens say ONNX Runtime is, found or not.
 const RUNTIME_PATH: &str = "/opt/onnxruntime/lib/libonnxruntime.so";
+/// Where the screens say the package's licence texts are, as a Linux package has them: the
+/// screens show the app as a package does, with its way to them in the About card.
+const LICENCES_PATH: &str = "/usr/lib/Photostacker/licenses";
+/// Where the screens of a Mac say ONNX Runtime is: inside the app.
+const MAC_RUNTIME_PATH: &str =
+    "/Applications/Photostacker.app/Contents/Frameworks/libonnxruntime.dylib";
 /// How far the `models` screen's download is held, in percent.
 const HELD_PERCENT: u64 = 43;
 
@@ -300,7 +330,7 @@ fn models_downloading(dirs: &AppDirs) -> Result<Prepared, String> {
     let file = models::model_file(&dirs.models(), base);
     let sparse = |file: &Path| -> std::io::Result<()> {
         fs::create_dir_all(file.parent().unwrap_or(file))?;
-        fs::File::create(file)?.set_len(base.size)
+        photostacker_testkit::sparse_file(file, base.size)
     };
     sparse(&file).map_err(|error| format!("{}: {error}", file.display()))?;
     Ok(Prepared {
@@ -315,8 +345,32 @@ fn models_downloading(dirs: &AppDirs) -> Result<Prepared, String> {
 fn models_failed(_dirs: &AppDirs) -> Result<Prepared, String> {
     Ok(Prepared {
         installer: Some(Arc::new(ScreenInstaller { fails: true })),
-        no_runtime: true,
+        runtime: Some(RuntimeCheck {
+            path: PathBuf::from(RUNTIME_PATH),
+            problem: Some(LibraryProblem::Missing),
+        }),
         download: Some("dinov2-small"),
+        ..Prepared::default()
+    })
+}
+
+/// The `needs-macos` screen's data: ONNX Runtime inside a Mac app, there but needing
+/// macOS 14.0 on macOS 13.6, and nothing to download.
+fn models_needing_macos(_dirs: &AppDirs) -> Result<Prepared, String> {
+    let version = |major, minor| OsVersion {
+        major,
+        minor,
+        patch: 0,
+    };
+    Ok(Prepared {
+        installer: Some(Arc::new(ScreenInstaller { fails: false })),
+        runtime: Some(RuntimeCheck {
+            path: PathBuf::from(MAC_RUNTIME_PATH),
+            problem: Some(LibraryProblem::NeedsMacos {
+                needed: version(14, 0),
+                running: version(13, 6),
+            }),
+        }),
         ..Prepared::default()
     })
 }
@@ -358,7 +412,7 @@ impl ModelInstall for ScreenInstaller {
         fs::create_dir_all(&folder)?;
         // Rounded up, so the whole percent is HELD_PERCENT exactly.
         let done = (spec.size * HELD_PERCENT).div_ceil(100);
-        fs::File::create(folder.join("model.onnx.part"))?.set_len(done)?;
+        photostacker_testkit::sparse_file(&folder.join("model.onnx.part"), done)?;
         progress(done, spec.size);
         while !cancel.load(Ordering::SeqCst) {
             thread::sleep(Duration::from_millis(50));
@@ -409,6 +463,47 @@ fn settings(context: &egui::Context, mut controller: Controller) -> Box<dyn Scre
     controller.set_defaults(defaults);
     controller.open_settings();
     Box::new(App::new(context, controller))
+}
+
+/// The app with Settings open and scrolled to their end, the About card.
+fn settings_at_the_end(context: &egui::Context, mut controller: Controller) -> Box<dyn Screened> {
+    controller.open_settings();
+    Box::new(ScrolledDown {
+        app: App::new(context, controller),
+    })
+}
+
+/// The app with the mouse wheel turned down over the middle of the window every frame, so
+/// what scrolls there shows its end.
+struct ScrolledDown {
+    app: App,
+}
+
+impl eframe::App for ScrolledDown {
+    fn raw_input_hook(&mut self, _context: &egui::Context, raw_input: &mut egui::RawInput) {
+        let middle = raw_input
+            .screen_rect
+            .map_or(egui::pos2(680.0, 410.0), |screen| screen.center());
+        raw_input.events.push(egui::Event::PointerMoved(middle));
+        // Negative: the content moves up, showing what is below.
+        raw_input.events.push(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -400.0),
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Unknown,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        self.app.ui(ui, frame);
+    }
+}
+
+impl Screened for ScrolledDown {
+    fn ready(&self) -> bool {
+        self.app.ready()
+    }
 }
 
 /// The `writing` screen's folder: three Canon brackets of three, 20 s apart.
@@ -746,6 +841,60 @@ fn no_stacks(_dirs: &AppDirs) -> Result<Prepared, String> {
         inspect: Some(folder),
         ..Prepared::default()
     })
+}
+
+/// The `names` screen's folder: "summer holidays" in Japanese.
+const NAMES_FOLDER: &str = "夏休み";
+/// The `names` screen's photos, top layer first: "sunset" in Simplified and Traditional
+/// Chinese, Korean, French, Arabic (two words), Hebrew, Thai and Russian. Inter has the
+/// letters of the French one, with its accent, and of the Russian one, and none of the
+/// others'. The French one is at 0 EV, so its layer name alone has no exposure after it.
+const NAMES: [&str; 8] = [
+    "夕阳",
+    "夕陽",
+    "일몰",
+    "Crépuscule",
+    "غروب الشمس",
+    "שקיעה",
+    "พระอาทิตย์ตก",
+    "Закат",
+];
+
+/// The `names` screen's folder: a bracket of eight JPEGs half an EV apart, with a Canon's
+/// exposure, named [`NAMES`].
+fn named_in_other_scripts(_dirs: &AppDirs) -> Result<Prepared, String> {
+    let root = photos_root()?;
+    let folder = root.path().join(NAMES_FOLDER);
+    fs::create_dir(&folder).map_err(|error| format!("{}: {error}", folder.display()))?;
+    let base = scene(5, WIDTH, HEIGHT);
+    for (shot, name) in (1..).zip(NAMES) {
+        // In half EVs: −1.5 to +2.
+        let half_evs = i32::from(shot) - 4;
+        let mut exif = canon_exposure_exif(u32::from(shot) - 1, shot);
+        exif.exif
+            .push((0x9204, Value::SRational(vec![(half_evs, 2)])));
+        let image = expose(&base, half_evs as f32 / 2.0);
+        let path = folder.join(format!("{name}.jpg"));
+        fs::write(&path, jpeg_with_exif(&image, &exif.build(), JPEG_QUALITY))
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+    }
+    Ok(Prepared {
+        _folders: vec![root],
+        inspect: Some(folder),
+        ..Prepared::default()
+    })
+}
+
+/// The app with the `names` screen's stack selected.
+fn inspecting_the_named_stack(
+    context: &egui::Context,
+    mut controller: Controller,
+) -> Box<dyn Screened> {
+    match stack_of(&controller, &format!("{}.jpg", NAMES[0])) {
+        Ok(stack) => controller.select_group(stack, false),
+        Err(error) => eprintln!("{error}"),
+    }
+    Box::new(App::new(context, controller))
 }
 
 /// The app with the JPEG bracket's stack selected, its second and third photos checked.
@@ -1163,8 +1312,9 @@ fn failed_start_database(context: &egui::Context, _controller: Controller) -> Bo
             installer: None,
             runtime: RuntimeCheck {
                 path: PathBuf::from(RUNTIME_PATH),
-                found: true,
+                problem: None,
             },
+            licences: Some(PathBuf::from(LICENCES_PATH)),
         });
         match started {
             Ok(_) => Err("a controller started on a database that is a folder".into()),
@@ -1383,10 +1533,11 @@ pub fn start(screen: &Screen) -> Result<(TempDir, Prepared, Held, Waker), String
         platform: Arc::new(Native),
         embedder: prepared.embedder.clone(),
         installer: prepared.installer.clone(),
-        runtime: RuntimeCheck {
+        runtime: prepared.runtime.clone().unwrap_or_else(|| RuntimeCheck {
             path: PathBuf::from(RUNTIME_PATH),
-            found: !prepared.no_runtime,
-        },
+            problem: None,
+        }),
+        licences: Some(PathBuf::from(LICENCES_PATH)),
     })
     .map_err(|error| format!("the app cannot start: {error}"))?;
     // Declared after the controller, so an early return drops it first.

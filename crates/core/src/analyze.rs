@@ -56,6 +56,7 @@ use crate::decode::{
 };
 use crate::discover::{DiscoverError, DiscoverSkip, DiscoveredFile, discover};
 use crate::exif::{ExifData, ExifError, read_exif};
+use crate::fsio::display_path;
 use crate::group::{FileFacts, RegroupInput, Thresholds, bucket, regroup};
 use crate::guard;
 use crate::hash::{HashPair, hash_pair, hash_pair_normalised};
@@ -383,7 +384,7 @@ pub fn analyze_with(config: &JobConfig, hooks: &AnalyzeHooks) -> Result<Analysis
         std::slice::from_ref(&config.output_dir),
     )?;
     tracing::info!(
-        input = %config.input_dir.display(),
+        input = %display_path(&config.input_dir),
         files = discovered.len(),
         skipped = skipped.len(),
         "discover: done"
@@ -550,7 +551,7 @@ impl Work<'_> {
                 // reader's and rawler's, its path when they are logged at
                 // `debug`. Only the warnings name it themselves, since the
                 // span is off at the default filter.
-                let span = tracing::debug_span!("file", path = %file.path.display()).entered();
+                let span = tracing::debug_span!("file", path = %display_path(&file.path)).entered();
                 done.push((at, job(id, file)));
                 drop(span);
                 ticker.tick(&file.path);
@@ -713,7 +714,7 @@ pub(crate) fn read_passive(
     file: &DiscoveredFile,
     cache: Option<&dyn ExamCache>,
 ) -> (FileKind, Option<ExifData>) {
-    let _span = tracing::debug_span!("file", path = %file.path.display()).entered();
+    let _span = tracing::debug_span!("file", path = %display_path(&file.path)).entered();
     let budget = MemoryBudget::new(DECODE_MEMORY_BUDGET);
     passive_exam(file, &budget, cache)
 }
@@ -727,7 +728,7 @@ pub(crate) fn examine_active(
     partner_exif: &[&ExifData],
     cache: Option<&dyn ExamCache>,
 ) -> FileExam {
-    let _span = tracing::debug_span!("file", path = %file.path.display()).entered();
+    let _span = tracing::debug_span!("file", path = %display_path(&file.path)).entered();
     let budget = MemoryBudget::new(DECODE_MEMORY_BUDGET);
     active_exam(file, partner_exif, &budget, cache)
 }
@@ -783,8 +784,8 @@ fn hash_active_files(
     for promotion in promote_partners(work, records, &partners, &examined, active.len())? {
         let raw = promotion.raw;
         tracing::debug!(
-            raw = %records[raw].path.display(),
-            partner = %records[promotion.partner].path.display(),
+            raw = %display_path(&records[raw].path),
+            partner = %display_path(&records[promotion.partner].path),
             "partner promoted over its RAW"
         );
         promotions[raw] = Some(promotion);
@@ -1202,7 +1203,7 @@ fn complete_exif<'a>(
 /// file's, while a passive file just lends nothing. The analysis goes on.
 fn step<T>(path: &Path, what: &str, work: impl FnOnce() -> T) -> Result<T, String> {
     guard::catch(work).map_err(|message| {
-        tracing::warn!(path = %path.display(), error = %message, "caught a panic while {what}");
+        tracing::warn!(path = %display_path(path), error = %message, "caught a panic while {what}");
         format!("internal error while {what}: {message}")
     })
 }

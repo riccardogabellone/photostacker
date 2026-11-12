@@ -6,6 +6,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+# Shipped in the app's packages, not on crates.io; so cargo-about leaves it out of
+# the third-party licences (about.toml).
+publish = false
 
 # The executable users see: Photostacker.exe on Windows, Photostacker elsewhere. The
 # display name and the app id come from src/identity.rs.
@@ -26,7 +29,11 @@ ml = ["photostacker-core/ml"]
 crossbeam-channel.workspace = true
 # `clipboard`: the system clipboard (arboard, and smithay-clipboard on Wayland), so a path
 # copied in another program pastes into a field, and the About card's addresses copy out.
-eframe = { workspace = true, features = ["accesskit", "clipboard", "default_fonts", "wayland", "x11"] }
+# `system_fonts`: a character none of the app's fonts has (Chinese, Japanese, Korean,
+# Arabic, Hebrew, Thai…) is drawn with a font installed on the system, found when it is
+# first drawn, behind Inter, egui's own fonts and the icon font (crates/ui/DESIGN.md,
+# Typography).
+eframe = { workspace = true, features = ["accesskit", "clipboard", "default_fonts", "system_fonts", "wayland", "x11"] }
 egui-notify.workspace = true
 egui_material_icons.workspace = true
 # Decodes the review thumbnails, which the engine writes as JPEGs, on the loader thread.
@@ -67,3 +74,133 @@ tempfile.workspace = true
 
 [target.'cfg(windows)'.build-dependencies]
 winresource.workspace = true
+
+# The packages, built with cargo-packager by scripts/package.sh (see packaging/README.md),
+# which runs it from this folder: the paths here are relative to it. The script builds
+# the two executables and stages the other files in dist/package first, so there is no
+# `before-packaging-command`, and passes the build and output folders itself.
+[package.metadata.packager]
+product-name = "Photostacker"
+identifier = "io.github.riccardogabellone.Photostacker"
+description = "Stack exposure brackets and bursts as layers in one PSD or TIFF"
+long-description = """
+Photostacker finds the series of one shot in a folder of photos (exposure brackets, HDR
+sets, fast bursts) and stacks each series as layers in one PSD, PSB or layered TIFF, ready
+for Photoshop or any editor that reads layers. It is a desktop app and a command-line tool.
+"""
+homepage = "https://github.com/riccardogabellone/photostacker"
+authors = ["Riccardo Gabellone"]
+publisher = "Riccardo Gabellone"
+# No `license-file`: cargo-packager would show it as a licence to accept, in both Windows
+# installers and before the disk image opens (where it would also stop a script's
+# `hdiutil attach`). The MIT licence asks for no acceptance, and every package carries it
+# in its licenses folder.
+category = "Photography"
+# The desktop app is the main binary: the packages, their launchers and the folder of
+# their other files (usr/lib/Photostacker on Linux) are named after it.
+binaries = [
+    { path = "Photostacker", main = true },
+    { path = "photostacker-cli" },
+]
+icons = [
+    "../../assets/icons/icon-32.png",
+    "../../assets/icons/icon-64.png",
+    "../../assets/icons/icon-128.png",
+    "../../assets/icons/icon-256.png",
+    "../../assets/icons/icon-512.png",
+    "../../assets/icons/icon.icns",
+    "../../assets/icons/icon.ico",
+]
+# Every file the script staged in dist/package/resources, at the same path in the
+# package's resource folder: beside the executables on Windows, usr/lib/Photostacker on
+# Linux, Contents/Resources on macOS, where the app looks (spec §8.3). A folder `src`
+# with a `target` puts the folder's contents under `target`; "." is the resource folder
+# itself.
+resources = [{ src = "../../dist/package/resources", target = "." }]
+
+[package.metadata.packager.macos]
+# ONNX Runtime goes to Contents/Frameworks, where the app looks for it (spec §8.3).
+frameworks = ["../../dist/package/frameworks/libonnxruntime.dylib"]
+# The oldest macOS the app runs on, as MACOSX_DEPLOYMENT_TARGET in .cargo/config.toml.
+minimum-system-version = "11.0"
+# An ad-hoc signature: no certificate, no Apple account, no notarisation. What it adds is
+# the seal over the app, its Info.plist, its resources and its nested code: without it
+# nothing seals the app, and the Apple-silicon executables carry only the linker's own
+# signature. Neither signature names an identity, so neither passes Gatekeeper: the first
+# start still asks the user (README, Installing). The packager signs every Mach-O file in
+# the app (ONNX Runtime's library too, in place of any signature it came with), then the
+# app, then the disk image.
+signing-identity = "-"
+# The packager always signs with the hardened runtime, under which macOS loads only
+# libraries signed by Apple or by the app's own team. An ad-hoc signature has no team, so
+# ONNX Runtime's library would not load: this file's one entitlement turns that check off.
+entitlements = "../../packaging/macos/entitlements.plist"
+
+# The generated desktop entry and icons are named after the binary, but the desktop
+# matches a window to its launcher by the app ID (src/identity.rs), so the packages
+# ship packaging/linux/ files named after the ID instead.
+[package.metadata.packager.linux]
+generate-desktop-entry = false
+
+[package.metadata.packager.deb]
+package-name = "photostacker"
+section = "graphics"
+depends = [
+    # Linked by both executables (their NEEDED entries): libc6 also holds libm and the
+    # dynamic loader; libstdc++6 and libgcc-s1 come with the C++ of libheif and of
+    # libde265, its HEVC decoder, which are both built in (libde265 from the release
+    # scripts/libde265.sh pins). ONNX Runtime's library, which the package carries, links
+    # nothing more.
+    # The app uses symbols of glibc 2.35 (`objdump -T`: GLIBC_2.35 is the highest), the
+    # build host's; an older glibc could not start it. libstdc++'s highest, GLIBCXX_3.4.29
+    # (GCC 11), comes with every release that has glibc 2.35, so it needs no version.
+    "libc6 (>= 2.35)",
+    "libstdc++6",
+    "libgcc-s1",
+    # Loaded at run time by the window toolkit (winit and glutin open them by name), so
+    # nothing in the executables names them: OpenGL through EGL or GLX, and Wayland or X11.
+    "libegl1",
+    "libgl1",
+    "libwayland-client0",
+    "libwayland-egl1",
+    "libxkbcommon0",
+    "libxkbcommon-x11-0",
+    "libx11-6",
+    "libx11-xcb1",
+    "libxcursor1",
+    "libxi6",
+    "libxrandr2",
+    # Loaded at run time by name too, by the lookup of a system font for a script the
+    # app's fonts lack (fontique, through eframe's `system_fonts`): without it the app
+    # runs, and names in those scripts are drawn as boxes.
+    "libfontconfig1",
+]
+
+[package.metadata.packager.deb.files]
+"../../packaging/linux/io.github.riccardogabellone.Photostacker.desktop" = "usr/share/applications/io.github.riccardogabellone.Photostacker.desktop"
+"../../packaging/linux/io.github.riccardogabellone.Photostacker.metainfo.xml" = "usr/share/metainfo/io.github.riccardogabellone.Photostacker.metainfo.xml"
+"../../assets/logo/logo.svg" = "usr/share/icons/hicolor/scalable/apps/io.github.riccardogabellone.Photostacker.svg"
+"../../assets/icons/icon-16.png" = "usr/share/icons/hicolor/16x16/apps/io.github.riccardogabellone.Photostacker.png"
+"../../assets/icons/icon-24.png" = "usr/share/icons/hicolor/24x24/apps/io.github.riccardogabellone.Photostacker.png"
+"../../assets/icons/icon-32.png" = "usr/share/icons/hicolor/32x32/apps/io.github.riccardogabellone.Photostacker.png"
+"../../assets/icons/icon-48.png" = "usr/share/icons/hicolor/48x48/apps/io.github.riccardogabellone.Photostacker.png"
+"../../assets/icons/icon-64.png" = "usr/share/icons/hicolor/64x64/apps/io.github.riccardogabellone.Photostacker.png"
+"../../assets/icons/icon-128.png" = "usr/share/icons/hicolor/128x128/apps/io.github.riccardogabellone.Photostacker.png"
+"../../assets/icons/icon-256.png" = "usr/share/icons/hicolor/256x256/apps/io.github.riccardogabellone.Photostacker.png"
+"../../assets/icons/icon-512.png" = "usr/share/icons/hicolor/512x512/apps/io.github.riccardogabellone.Photostacker.png"
+
+# No `appimage.libs`: linuxdeploy, which makes the AppImage, copies into usr/lib every
+# library the executables link but the base system's (libc, libstdc++ and the like), and
+# they link no other: libheif and libde265 are built in. scripts/smoke.sh checks that the
+# AppImage holds no libde265.
+
+# The AppImage tooling looks for the desktop entry under the main binary's name.
+[package.metadata.packager.appimage.files]
+"../../packaging/linux/io.github.riccardogabellone.Photostacker.desktop" = "usr/share/applications/Photostacker.desktop"
+"../../assets/logo/logo.svg" = "usr/share/icons/hicolor/scalable/apps/io.github.riccardogabellone.Photostacker.svg"
+"../../assets/icons/icon-16.png" = "usr/share/icons/hicolor/16x16/apps/io.github.riccardogabellone.Photostacker.png"
+"../../assets/icons/icon-32.png" = "usr/share/icons/hicolor/32x32/apps/io.github.riccardogabellone.Photostacker.png"
+"../../assets/icons/icon-64.png" = "usr/share/icons/hicolor/64x64/apps/io.github.riccardogabellone.Photostacker.png"
+"../../assets/icons/icon-128.png" = "usr/share/icons/hicolor/128x128/apps/io.github.riccardogabellone.Photostacker.png"
+"../../assets/icons/icon-256.png" = "usr/share/icons/hicolor/256x256/apps/io.github.riccardogabellone.Photostacker.png"
+"../../assets/icons/icon-512.png" = "usr/share/icons/hicolor/512x512/apps/io.github.riccardogabellone.Photostacker.png"

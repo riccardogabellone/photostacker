@@ -1,0 +1,42 @@
+# Third-party licences: the Rust crates
+
+This file lists the licence of every Rust crate built into Photostacker, the app and its command-line tool, followed by each licence's text. Photostacker itself is under the MIT licence, in `LICENSE`.
+
+What is not a Rust crate is in `THIRD-PARTY-NOTICES.md`: libheif and libde265, ONNX Runtime, the Visual C++ runtime of the Windows packages, the Inter typeface, the Material Symbols icons, and the code ported from other projects. Beside it are the GNU licences as the Free Software Foundation publishes them: `LGPL-2.1.txt` for rawler, and for libheif and libde265 `LGPL-3.0.txt` with `GPL-3.0.txt`, the licence the LGPL-3.0 adds its permissions to.
+
+A crate offered under a choice of licences is listed under the one Photostacker uses it under. A crate under two or more licences at once is listed under each. A licence comes once for each different text of it: crates whose copies differ, by their copyright lines for example, are listed apart.
+
+## Overview
+
+| Licence | Crates |
+|---|---:|
+{{#each overview}}
+| {{{name}}} (`{{{id}}}`) | {{count}} |
+{{/each}}
+
+## The licence texts
+
+{{#each licenses}}
+### {{{name}}} (`{{{id}}}`)
+
+{{#if source_path}}
+Used by:
+
+{{#each used_by}}
+- {{{crate.name}}} {{{crate.version}}}: {{#if crate.repository}}{{{crate.repository}}}{{else}}https://crates.io/crates/{{{crate.name}}}{{/if}}
+{{/each}}
+{{else}}
+These crates were published without a licence file, and their repositories held no licence text at the commits they were published from. The text below is the licence's standard text. Beside each crate are the authors its package declares, if any.
+
+Used by:
+
+{{#each used_by}}
+- {{{crate.name}}} {{{crate.version}}}: {{#if crate.repository}}{{{crate.repository}}}{{else}}https://crates.io/crates/{{{crate.name}}}{{/if}}; {{#if crate.authors}}authors: {{#each crate.authors}}{{#unless @first}}, {{/unless}}{{{this}}}{{/each}}{{else}}no authors declared{{/if}}
+{{/each}}
+{{/if}}
+
+`````text
+{{{text}}}
+`````
+
+{{/each}}

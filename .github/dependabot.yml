@@ -1,0 +1,17 @@
+# The actions the workflows and the shared build inputs use, pinned to commits: once a
+# month Dependabot proposes their updates, grouped, with the version comments beside the
+# commits. "/" covers .github/workflows and an action.yml at the root only, so the
+# composite action's folder is named too.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directories:
+      - "/"
+      - "/.github/actions/build-inputs"
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci

@@ -349,7 +349,8 @@ impl Controller {
 
     /// Takes the files or folders dropped on the window: the first that is a folder, or
     /// a file's folder, opens the form. One look at each path (whether it is a folder) is
-    /// the one file-system call a controller method makes on the UI thread.
+    /// the one file-system call the app's own code makes on the UI thread after start-up
+    /// (the rule and its exceptions: crates/ui/DESIGN.md, State and the engine).
     pub fn dropped(&mut self, paths: &[PathBuf]) {
         let mut folders: Vec<PathBuf> = Vec::new();
         for folder in paths.iter().filter_map(|path| dropped_folder(path)) {

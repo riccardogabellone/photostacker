@@ -11,8 +11,8 @@ use std::time::{Duration, Instant};
 
 use common::{
     FakeInstaller, FakePlatform, Gate, HeldEmbedder, NEAR, OpenOnDrop, TIME_WINDOW, bracket_folder,
-    controller, data_dir, options, review_folder, runtime_found, settle, wait_for_the_answer,
-    wait_until, write_ambiguous_stack, write_spaced_shots,
+    controller, data_dir, options, review_folder, runtime_found, runtime_needing_macos, settle,
+    wait_for_the_answer, wait_until, write_ambiguous_stack, write_spaced_shots,
 };
 use image::RgbImage;
 use photostacker_core::analyze::Stage;
@@ -29,8 +29,8 @@ use photostacker_testkit::photos::{write_bracket, write_lone_shots, write_raw_br
 use photostacker_ui::backend::{BACKEND_THREAD, Command, Request};
 use photostacker_ui::controller::form::Field;
 use photostacker_ui::controller::{
-    Controller, MlState, Notice, NoticeLevel, Question, REVEAL_THREAD, Reveal, Review,
-    RuntimeCheck, Selection, StartError, View, WriteCounts,
+    Controller, LibraryProblem, MlState, Notice, NoticeLevel, Question, REVEAL_THREAD, Reveal,
+    Review, RuntimeCheck, Selection, StartError, View, WriteCounts,
 };
 use photostacker_ui::platform::{Picked, Platform};
 use photostacker_ui::prefs::{FormDefaults, Panels, Prefs, ThemeChoice};
@@ -1231,8 +1231,9 @@ fn answers_out_of_the_forms_sight_land_on_their_own_form_or_job() {
     assert!(controller.take_submitted().is_empty());
 }
 
-/// A folder in `root` whose name is not valid UTF-8.
-#[cfg(unix)]
+/// A folder in `root` whose name is not valid UTF-8. Not on macOS, whose file system
+/// (APFS) refuses to create such a name: the tests that need one are left out there.
+#[cfg(all(unix, not(target_os = "macos")))]
 fn not_unicode_folder(root: &Path) -> PathBuf {
     use std::os::unix::ffi::OsStrExt;
     let folder = root.join(std::ffi::OsStr::from_bytes(b"caf\xe9"));
@@ -1241,7 +1242,7 @@ fn not_unicode_folder(root: &Path) -> PathBuf {
 }
 
 /// The warning about `folder`, whose name is not valid Unicode.
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "macos")))]
 fn not_unicode_warning(folder: &Path) -> Notice {
     Notice {
         level: NoticeLevel::Warning,
@@ -1252,7 +1253,7 @@ fn not_unicode_warning(folder: &Path) -> Notice {
     }
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "macos")))]
 #[test]
 fn dropping_a_folder_whose_name_is_not_unicode_is_refused_plainly() {
     let (_data, dirs) = data_dir();
@@ -1277,7 +1278,7 @@ fn dropping_a_folder_whose_name_is_not_unicode_is_refused_plainly() {
     assert_eq!(controller.take_notices(), [not_unicode_warning(&folder)]);
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "macos")))]
 #[test]
 fn browsing_to_a_folder_whose_name_is_not_unicode_is_refused_plainly() {
     let (_data, dirs) = data_dir();
@@ -2420,7 +2421,7 @@ fn wait_for_the_models(controller: &mut Controller) {
 fn runtime_missing() -> RuntimeCheck {
     RuntimeCheck {
         path: PathBuf::from("/nowhere/libonnxruntime.so"),
-        found: false,
+        problem: Some(LibraryProblem::Missing),
     }
 }
 
@@ -2482,9 +2483,14 @@ fn ml_state_follows_the_switch_the_model_and_its_download() {
     // Without ONNX Runtime the check cannot run, whatever is installed and switched on.
     let controller = installing_controller(&dirs, &installer, runtime_missing());
     assert!(controller.prefs.ml_enabled);
+    assert_eq!(controller.ml_state(), MlState::NoRuntime(runtime_missing()));
+    drop(controller);
+
+    // Nor with a library that needs a newer macOS.
+    let controller = installing_controller(&dirs, &installer, runtime_needing_macos());
     assert_eq!(
         controller.ml_state(),
-        MlState::NoRuntime(runtime_missing().path)
+        MlState::NoRuntime(runtime_needing_macos())
     );
 }
 
@@ -2546,10 +2552,13 @@ fn a_new_job_names_the_active_model_only_when_ml_is_on() {
     settle(&mut controller);
     drop(controller);
 
-    // Without ONNX Runtime no job names a model.
-    let mut controller = installing_controller(&dirs, &installer, runtime_missing());
-    assert!(controller.prefs.ml_enabled);
-    assert_eq!(model_of_a_new_job(&mut controller, input.path()), none);
+    // Without ONNX Runtime no job names a model, nor with one that needs a newer macOS.
+    for runtime in [runtime_missing(), runtime_needing_macos()] {
+        let mut controller = installing_controller(&dirs, &installer, runtime);
+        assert!(controller.prefs.ml_enabled);
+        assert_eq!(model_of_a_new_job(&mut controller, input.path()), none);
+        settle(&mut controller);
+    }
 }
 
 #[test]
@@ -2603,7 +2612,8 @@ fn importing_asks_for_a_file_and_installs_it() {
     platform.files.lock().unwrap().push_back(file.clone());
     controller.import_model("dinov2-small");
     wait_until(&mut controller, "the model installed", |controller| {
-        model_view(controller, "dinov2-small").is_some_and(|view| view.installed)
+        model_view(controller, "dinov2-small")
+            .is_some_and(|view| view.installed && view.activity == ModelActivity::Idle)
     });
 
     assert_eq!(installer.imported(), [file]);

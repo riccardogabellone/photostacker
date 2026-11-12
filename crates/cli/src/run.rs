@@ -1,4 +1,4 @@
-//! `photostacker run` (spec §10): one job on an engine of the CLI's own.
+//! `photostacker-cli run` (spec §10): one job on an engine of the CLI's own.
 //!
 //! The job is submitted without `auto_confirm`, so it stops in Review
 //! Pending once scanned (Stage 3 included). Its plan is then built from the
@@ -21,7 +21,7 @@ use anyhow::{Context, anyhow};
 use clap::{Args, ValueEnum};
 use photostacker_core::analyze::FileRecord;
 use photostacker_core::engine::{GroupView, JobId};
-use photostacker_core::fsio::write_replace;
+use photostacker_core::fsio::{display_path, write_replace};
 use photostacker_core::model::{GroupStatus, JobStatus, OutputFormat, RawJpegPreference, RawTone};
 use photostacker_core::{
     AppDirs, Engine, EngineError, EngineEvent, EngineOptions, JobConfig, PlanV1, Progress, Stage,
@@ -176,7 +176,7 @@ pub(crate) fn run(args: &RunArgs) -> Result<(), Failure> {
         JobStatus::Failed => {
             return Err(Failure::Runtime(anyhow!(
                 "cannot analyse {}: {}",
-                config.input_dir.display(),
+                display_path(&config.input_dir),
                 job_error(engine, job)
             )));
         }
@@ -209,7 +209,7 @@ pub(crate) fn run(args: &RunArgs) -> Result<(), Failure> {
     }
     // The plan file is optional here, so the per-file errors are named too.
     for error in &plan.errors {
-        eprintln!("error: {}: {}", error.file.display(), error.error);
+        eprintln!("error: {}: {}", display_path(&error.file), error.error);
     }
 
     // With no group the write writes nothing, and the output folder is
@@ -303,9 +303,10 @@ impl Session {
         .map_err(|error| match error {
             // It names the database already.
             EngineError::Busy(_) => Failure::Runtime(anyhow!(error)),
-            other => Failure::Runtime(
-                anyhow!(other).context(format!("cannot open the job database {}", db.display())),
-            ),
+            other => Failure::Runtime(anyhow!(other).context(format!(
+                "cannot open the job database {}",
+                display_path(&db)
+            ))),
         })?;
         Ok(Session {
             engine,
@@ -417,7 +418,7 @@ fn submit_failure(error: EngineError) -> Failure {
         EngineError::Config(error) => Failure::Usage(error.to_string()),
         EngineError::NotUtf8(path) => Failure::Runtime(anyhow!(
             "the path {} is not valid UTF-8, which a job needs",
-            path.display()
+            display_path(&path)
         )),
         other => engine_failure(other),
     }
@@ -450,7 +451,7 @@ impl<'a> Report<'a> {
         for group in groups {
             // A group has at least two members, and the store keeps every
             // member and warning an id of the job's files.
-            let first = files[group.members[0]].path.display();
+            let first = display_path(&files[group.members[0]].path);
             let reason = group.error.as_deref().unwrap_or_default();
             match (group.status, &group.output_path) {
                 (GroupStatus::Written, Some(path)) => report.written.push(path),
@@ -471,7 +472,7 @@ impl<'a> Report<'a> {
         }
         for group in groups {
             for (file, warning) in &group.warnings {
-                let file = files[*file].path.display();
+                let file = display_path(&files[*file].path);
                 report.lines.push(format!("warning: {file}: {warning}"));
             }
         }
@@ -480,7 +481,9 @@ impl<'a> Report<'a> {
 }
 
 /// Prints each path on its own line to stdout. On Unix a path is printed as
-/// its bytes, so one that is not UTF-8 still names its file.
+/// its bytes, so one that is not UTF-8 still names its file; elsewhere as it
+/// reads ([`display_path`]): on Windows without the verbatim `\\?\` prefix of
+/// the engine's canonical output paths.
 fn print_paths(paths: &[&Path]) -> anyhow::Result<()> {
     let mut stdout = io::stdout().lock();
     paths
@@ -501,7 +504,7 @@ fn path_bytes(path: &Path) -> Vec<u8> {
 
 #[cfg(not(unix))]
 fn path_bytes(path: &Path) -> Vec<u8> {
-    path.to_string_lossy().into_owned().into_bytes()
+    display_path(path).into_bytes()
 }
 
 /// The plan as pretty JSON with a final newline. JSON strings are UTF-8, so
@@ -515,7 +518,7 @@ fn plan_json(plan: &PlanV1) -> anyhow::Result<String> {
         Err(error) => Err(match non_utf8_path(plan) {
             Some(path) => anyhow!(
                 "cannot write the plan as JSON: the path {} is not valid UTF-8",
-                path.display()
+                display_path(path)
             ),
             None => anyhow!(error).context("cannot write the plan as JSON"),
         }),
@@ -548,7 +551,7 @@ fn non_utf8_path(plan: &PlanV1) -> Option<&Path> {
 fn write_plan(file: Option<&Path>, json: &str) -> anyhow::Result<()> {
     match file {
         Some(file) => write_replace(file, json.as_bytes())
-            .with_context(|| format!("cannot write the plan to {}", file.display())),
+            .with_context(|| format!("cannot write the plan to {}", display_path(file))),
         None => {
             let mut stdout = io::stdout().lock();
             stdout
@@ -570,7 +573,7 @@ mod tests {
     fn args_of(argv: &[&str]) -> RunArgs {
         match Cli::try_parse_from(argv).unwrap().command {
             Command::Run(args) => args,
-            Command::Models(_) => unreachable!("a run"),
+            Command::Models(_) | Command::Info => unreachable!("a run"),
         }
     }
 
@@ -583,14 +586,14 @@ mod tests {
             ..JobConfig::new("/in".into())
         };
         assert_eq!(
-            args_of(&["photostacker", "run", "/in"]).job_config(),
+            args_of(&["photostacker-cli", "run", "/in"]).job_config(),
             JobConfig {
                 auto_confirm: true,
                 ..defaults.clone()
             }
         );
         assert_eq!(
-            args_of(&["photostacker", "run", "/in", "--dry-run"]).job_config(),
+            args_of(&["photostacker-cli", "run", "/in", "--dry-run"]).job_config(),
             defaults
         );
     }
@@ -638,7 +641,7 @@ mod tests {
     /// the app does (spec §5.2), and its help says so.
     #[test]
     fn the_window_defaults_to_30_seconds() {
-        let args = args_of(&["photostacker", "run", "/in"]);
+        let args = args_of(&["photostacker-cli", "run", "/in"]);
         assert_eq!(args.job_config().time_window_seconds, 30);
         let help = Cli::command()
             .find_subcommand_mut("run")
@@ -652,7 +655,7 @@ mod tests {
     #[test]
     fn options_override_the_job_config() {
         let args = args_of(&[
-            "photostacker",
+            "photostacker-cli",
             "run",
             "/in",
             "-o",
@@ -696,10 +699,11 @@ mod tests {
     /// `--no-ml` turns Stage 3 off, and naming a model with it is an error.
     #[test]
     fn no_ml_turns_stage_3_off() {
-        let args = args_of(&["photostacker", "run", "/in", "--no-ml"]);
+        let args = args_of(&["photostacker-cli", "run", "/in", "--no-ml"]);
         assert_eq!(args.job_config().ml_model, None);
         assert!(
-            Cli::try_parse_from(["photostacker", "run", "/in", "--no-ml", "--model", "x"]).is_err()
+            Cli::try_parse_from(["photostacker-cli", "run", "/in", "--no-ml", "--model", "x"])
+                .is_err()
         );
     }
 

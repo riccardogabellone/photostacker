@@ -1,0 +1,188 @@
+name: CI
+
+# Every pull request and every push to main: the format, the dependencies' licences and
+# advisories, and on each of the four systems the releases ship for, the lints, the tests
+# and a release build (spec §11.2).
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# One run per branch or pull request; a newer push cancels an older run of a pull request.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  # The Windows build must embed the app's icon (crates/ui/build.rs).
+  REQUIRE_WINDOWS_ICON: "1"
+
+# Bash everywhere, Git Bash on Windows, so one script serves every system. Every cargo
+# starts in the repository's root, where it reads .cargo/config.toml: the build settings
+# there (CMAKE_TOOLCHAIN_FILE, MACOSX_DEPLOYMENT_TARGET, LIBSQLITE3_FLAGS) are set by no
+# step here.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  lint:
+    name: Format, lints and licences
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # A commit of the action's `stable` branch, which Dependabot cannot move (it moves
+      # tags): move it by hand, in every workflow at once, to the commit that
+      #   gh api repos/dtolnay/rust-toolchain/commits/stable --jq .sha
+      # prints.
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          components: rustfmt
+      - name: Format
+        run: cargo fmt --all --check
+      # Licences, advisories, bans and sources, against deny.toml. Clippy runs in each Tests
+      # job: the code of each system is linted only on it.
+      - name: Dependencies
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check
+          # The action's own Rust is older than the workspace's.
+          rust-version: stable
+
+  test:
+    name: Tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    # A cold build compiles the workspace three times (clippy, tests, release) and, on
+    # Windows, libheif with vcpkg first.
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Moved by hand: see the lint job.
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          components: clippy
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          # cargo does not build libheif-sys again when only libheif's toolchain file
+          # changes, or the pin of libde265 (Linux, macOS) or of vcpkg's libheif and libde265
+          # (Windows): a cached build would keep a libheif compiled against the old headers,
+          # or the old link lines.
+          key: libheif-${{ hashFiles('packaging/cmake/libheif.cmake', 'scripts/libde265.sh', 'scripts/windows-heif.ps1') }}
+          # A failed job keeps the tools and dependencies it built for the next run.
+          cache-on-failure: true
+      # A prebuilt nextest, for every runner here.
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: nextest@0.9.150
+          fallback: none
+
+      # The system packages, the pinned libde265 (Linux, macOS) or vcpkg (Windows), and ONNX
+      # Runtime (ORT_DYLIB_PATH).
+      - uses: ./.github/actions/build-inputs
+
+      # dinov2-small, which a model test runs, from PHOTOSTACKER_MODELS_DIR: downloaded by the
+      # tool itself into <data folder>/models, the registry's pinned file (spec §8.1).
+      - name: Where the model goes
+        run: echo "PHOTOSTACKER_MODELS_DIR=$RUNNER_TEMP/photostacker-data/models" >>"$GITHUB_ENV"
+      - name: Cache the model
+        id: model
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.PHOTOSTACKER_MODELS_DIR }}
+          # The registry pins the model's address and SHA-256.
+          key: dinov2-small-${{ runner.os }}-${{ hashFiles('crates/core/src/models/registry.rs') }}
+      # In release, as the job's last step builds: that step then reuses most of this build.
+      - name: Download the model
+        if: steps.model.outputs.cache-hit != 'true'
+        env:
+          PHOTOSTACKER_DATA_DIR: ${{ runner.temp }}/photostacker-data
+        run: cargo run --release --locked -p photostacker-cli -- models download dinov2-small
+
+      # A test that finds no ONNX Runtime, no model or fewer than three cores passes with a
+      # "skipped:" line; here that is a failure instead.
+      - name: Nothing for the tests to skip
+        run: |
+          status=0
+          library=${ORT_DYLIB_PATH:-}
+          model="${PHOTOSTACKER_MODELS_DIR:-}/dinov2-small/model.onnx"
+          if [ "$RUNNER_OS" = Windows ]; then
+            if [ -n "$library" ]; then library=$(cygpath -u "$library"); fi
+            model=$(cygpath -u "$model")
+          fi
+          if [ -z "$library" ] || [ ! -f "$library" ]; then
+            echo "::error::ORT_DYLIB_PATH (${ORT_DYLIB_PATH:-not set}) names no file: the tests that run ONNX Runtime would be skipped"
+            status=1
+          fi
+          if [ ! -s "$model" ]; then
+            echo "::error::there is no model file at $model: the dinov2-small test would be skipped"
+            status=1
+          fi
+          cores=$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-}")
+          case "$cores" in
+            '' | *[!0-9]*)
+              echo "::error::could not count this runner's logical cores (found \"$cores\")"
+              exit 1
+              ;;
+          esac
+          if [ "$cores" -lt 3 ]; then
+            echo "::error::this runner has $cores logical cores, and the screens that hold a scan need 3: their tests would be skipped"
+            status=1
+          fi
+          if [ "$status" = 0 ]; then
+            echo "ONNX Runtime at $ORT_DYLIB_PATH, the model at $model, $cores logical cores"
+          fi
+          exit "$status"
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # --no-fail-fast: a run that fails names every test that fails on its system, not
+      # only the first. For the same reason the second run on Linux follows a first that
+      # failed (not one that never started).
+      - name: Tests
+        id: tests
+        run: cargo nextest run --workspace --locked --no-fail-fast
+      - name: Tests without ml and heic (Linux)
+        if: ${{ !cancelled() && runner.os == 'Linux' && steps.tests.conclusion != 'skipped' }}
+        run: cargo nextest run --workspace --locked --no-fail-fast --no-default-features
+      # The tests run in the test profile; this builds the executables users get.
+      - name: Release build
+        run: cargo build --release --locked -p photostacker-ui -p photostacker-cli
+      # The executables have the pinned libde265 built in, as the packages must (spec §11.1);
+      # the release workflow's scripts/package.sh makes the same check.
+      - name: libde265 is built in (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          if ! scripts/libde265-built-in.sh target/release/Photostacker target/release/photostacker-cli; then
+            echo "::error::libde265 is not shown to be built into the executables (the line above says why); where one needs the system's shared libde265, look at the build inputs' step \"libde265 (Linux)\", which builds the pinned one and sets CMAKE_PREFIX_PATH and PKG_CONFIG_PATH"
+            exit 1
+          fi
+
+      # libde265.sh checks libde265's objects; this checks libheif's, which cmake built
+      # through libheif-sys (scripts/macos-min.sh says why).
+      - name: libheif's objects run on macOS 11.0 (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set --
+          while IFS= read -r archive; do
+            set -- "$@" "$archive"
+          done < <(find target -path '*/build/libheif-sys-*/out/*' -name libheif.a 2>/dev/null || true)
+          if [ "$#" = 0 ]; then
+            echo "::error::found no libheif.a under target/*/build/libheif-sys-*/out/"
+            exit 1
+          fi
+          scripts/macos-min.sh 11.0 "$@"

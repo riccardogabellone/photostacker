@@ -29,6 +29,8 @@ const RESET: &str = "Reset to the built-in defaults";
 /// What the About card says before the components that are not MIT.
 const LICENCE: &str =
     "Free software under the MIT licence. These parts have licences of their own:";
+/// What the About card says, in a package, before its way to the licence texts.
+const LICENCES_SHIP: &str = "The licence texts of every part ship with the app.";
 /// The HEVC patents' caveat (spec §3).
 #[cfg(feature = "heic")]
 const HEVC: &str = "HEVC, the codec of HEIC photos, may be covered by patents in some \
@@ -39,6 +41,7 @@ enum Action {
     Done,
     Theme(ThemeChoice),
     Defaults(FormDefaults),
+    OpenLicences,
     OpenLogs,
 }
 
@@ -73,13 +76,15 @@ pub fn show(ui: &mut egui::Ui, controller: &mut Controller) {
                 ui.add_space(CARD_GAP);
                 models::show(ui, controller);
                 ui.add_space(CARD_GAP);
-                about(ui, &mut action);
+                let packaged = controller.licences_folder().is_some();
+                about(ui, packaged, &mut action);
             });
         });
     match action {
         Some(Action::Done) => controller.close_settings(),
         Some(Action::Theme(choice)) => controller.set_theme(choice),
         Some(Action::Defaults(defaults)) => controller.set_defaults(defaults),
+        Some(Action::OpenLicences) => controller.open_licences(),
         Some(Action::OpenLogs) => controller.open_logs(),
         None => {}
     }
@@ -181,9 +186,10 @@ fn components() -> Vec<Component> {
     components
 }
 
-/// The version, the licence, the components that are not MIT, the HEVC caveat in a
-/// build that decodes HEIC, and the logs folder.
-fn about(ui: &mut egui::Ui, action: &mut Option<Action>) {
+/// The version, the licence, the components that are not MIT, the way to the licence
+/// texts in a package (`packaged`: the app has the folder of its licence texts), the
+/// HEVC caveat in a build that decodes HEIC, and the logs folder.
+fn about(ui: &mut egui::Ui, packaged: bool, action: &mut Option<Action>) {
     let palette = theme::palette(ui.ctx());
     let semibold = egui::FontFamily::Name(SEMIBOLD_FAMILY.into());
     widgets::card(ui, "About", None, |ui| {
@@ -206,6 +212,15 @@ fn about(ui: &mut egui::Ui, action: &mut Option<Action>) {
             });
         }
         ui.add_space(6.0);
+        // A development build has no folder of licence texts, so it says nothing of one.
+        if packaged {
+            ui.add(Label::new(LICENCES_SHIP).wrap());
+            ui.add_space(4.0);
+            if widgets::text_button(ui, "Open the licences folder", Emphasis::Normal).clicked() {
+                *action = Some(Action::OpenLicences);
+            }
+            ui.add_space(6.0);
+        }
         #[cfg(feature = "heic")]
         ui.add(Label::new(HEVC).wrap());
         ui.add_space(4.0);

@@ -1,6 +1,5 @@
 //! How paths, sizes, counts, statuses, errors and a photo's exposure read on screen.
 
-use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 use photostacker_core::engine::JobCounts;
@@ -10,7 +9,11 @@ use photostacker_core::models::url_host;
 use photostacker_core::write::format_ev;
 use photostacker_core::{EngineError, Stage};
 
-use crate::controller::MlState;
+use crate::controller::{LibraryProblem, MlState, RuntimeCheck};
+
+/// How a path reads on screen is how the CLI prints it: the core's rules, so the two never
+/// drift.
+pub use photostacker_core::fsio::{display_path, without_verbatim_prefix};
 
 /// One mebibyte, the unit sizes are shown in.
 const MIB: u64 = 1 << 20;
@@ -127,13 +130,6 @@ fn status_phrase(status: JobStatus) -> &'static str {
     }
 }
 
-/// A path as the user knows it: lossy where it is not valid Unicode, and without the
-/// Windows verbatim prefix the core's canonical paths carry ([`without_verbatim_prefix`]).
-/// For display only: a lossy result may not open.
-pub fn display_path(path: &Path) -> String {
-    without_verbatim_prefix(&path.to_string_lossy()).into_owned()
-}
-
 /// `path` as the desktop's shell takes it, to show it in the file manager: without the
 /// Windows verbatim prefix ([`without_verbatim_prefix`]), which the engine's canonical
 /// output paths carry and the shell's calls do not take. A path that is not valid
@@ -143,25 +139,6 @@ pub fn openable_path(path: &Path) -> PathBuf {
         Some(text) => PathBuf::from(without_verbatim_prefix(text).as_ref()),
         None => path.to_path_buf(),
     }
-}
-
-/// `text`, a path, without the Windows verbatim prefix: `\\?\C:\a` is `C:\a`, and
-/// `\\?\UNC\host\share\a` is `\\host\share\a`; any other text (a volume's verbatim path
-/// among them, which has no other form) is left as it is. Plain string work, the same on
-/// every platform.
-pub fn without_verbatim_prefix(text: &str) -> Cow<'_, str> {
-    let Some(rest) = text.strip_prefix(r"\\?\") else {
-        return Cow::Borrowed(text);
-    };
-    if let Some(share) = rest.strip_prefix(r"UNC\") {
-        return Cow::Owned(format!(r"\\{share}"));
-    }
-    let mut chars = rest.chars();
-    let drive = chars
-        .next()
-        .is_some_and(|letter| letter.is_ascii_alphabetic())
-        && chars.next() == Some(':');
-    Cow::Borrowed(if drive { rest } else { text })
 }
 
 /// The last component of a folder's path, such as `trip` for `/photos/trip`, or of a
@@ -231,6 +208,22 @@ pub fn ml_state_text(state: &MlState) -> String {
         MlState::Downloading { percent, .. } => format!("ML {percent} %"),
         MlState::Ready(_) => "ML ready".to_owned(),
     }
+}
+
+/// What the app says of the visual check, wherever it says that ONNX Runtime is missing,
+/// when the library is there but needs a newer macOS than this one: `The visual check needs
+/// macOS 14.0 or later on this Mac.` `None` for any other state, which keeps its own words.
+pub fn needs_macos_text(state: &MlState) -> Option<String> {
+    let MlState::NoRuntime(RuntimeCheck {
+        problem: Some(LibraryProblem::NeedsMacos { needed, .. }),
+        ..
+    }) = state
+    else {
+        return None;
+    };
+    Some(format!(
+        "The visual check needs macOS {needed} or later on this Mac."
+    ))
 }
 
 /// A size in bytes as whole mebibytes, rounded to the nearest, written `MB` as file
@@ -367,9 +360,18 @@ mod tests {
         assert_eq!(download_percent(0, 0), 0);
         assert_eq!(download_percent(u64::MAX, u64::MAX), 100);
         let id = "dinov2-small";
+        let missing = RuntimeCheck {
+            path: "/x".into(),
+            problem: Some(LibraryProblem::Missing),
+        };
+        let needs_macos = RuntimeCheck {
+            problem: Some(needs_macos_14_on_13_6()),
+            ..missing.clone()
+        };
         for (state, text) in [
             (MlState::NotBuilt, "ML unavailable"),
-            (MlState::NoRuntime("/x".into()), "ML unavailable"),
+            (MlState::NoRuntime(missing), "ML unavailable"),
+            (MlState::NoRuntime(needs_macos), "ML unavailable"),
             (MlState::Off, "ML off"),
             (MlState::Missing(id), "ML: no model"),
             (MlState::Downloading { id, percent: 43 }, "ML 43 %"),
@@ -377,6 +379,38 @@ mod tests {
         ] {
             assert_eq!(ml_state_text(&state), text);
         }
+    }
+
+    /// A library that needs macOS 14.0, on macOS 13.6.
+    fn needs_macos_14_on_13_6() -> LibraryProblem {
+        let version = |major, minor| crate::controller::OsVersion {
+            major,
+            minor,
+            patch: 0,
+        };
+        LibraryProblem::NeedsMacos {
+            needed: version(14, 0),
+            running: version(13, 6),
+        }
+    }
+
+    #[test]
+    fn a_library_for_a_newer_macos_is_said_in_one_sentence() {
+        let check = |problem| {
+            MlState::NoRuntime(RuntimeCheck {
+                path: "/Applications/Photostacker.app/Contents/Frameworks/libonnxruntime.dylib"
+                    .into(),
+                problem: Some(problem),
+            })
+        };
+        assert_eq!(
+            needs_macos_text(&check(needs_macos_14_on_13_6())).as_deref(),
+            Some("The visual check needs macOS 14.0 or later on this Mac.")
+        );
+        // Every other state keeps its own words.
+        assert_eq!(needs_macos_text(&check(LibraryProblem::Missing)), None);
+        assert_eq!(needs_macos_text(&MlState::Off), None);
+        assert_eq!(needs_macos_text(&MlState::NotBuilt), None);
     }
 
     #[test]
@@ -523,29 +557,15 @@ mod tests {
     }
 
     #[test]
-    fn a_verbatim_windows_path_is_shown_without_its_prefix() {
-        assert_eq!(display_path(Path::new(r"\\?\C:\a")), r"C:\a");
-        assert_eq!(
-            display_path(Path::new(r"\\?\UNC\host\share")),
-            r"\\host\share"
-        );
-        assert_eq!(display_path(Path::new(r"C:\a")), r"C:\a");
-        assert_eq!(display_path(Path::new("/photos/trip")), "/photos/trip");
-    }
-
-    #[test]
     fn a_verbatim_windows_path_opens_without_its_prefix() {
-        let strip = |text: &str| without_verbatim_prefix(text).into_owned();
-        assert_eq!(strip(r"\\?\C:\x"), r"C:\x");
-        assert_eq!(strip(r"\\?\d:\out\a_3.psd"), r"d:\out\a_3.psd");
-        assert_eq!(strip(r"\\?\UNC\server\share\x"), r"\\server\share\x");
-        // Anything else is left alone: a volume's verbatim path has no other form.
+        // The rules are the core's (`fsio::without_verbatim_prefix`); this is the path the
+        // file manager is handed.
+        assert_eq!(
+            openable_path(Path::new(r"\\?\UNC\server\share\x")),
+            PathBuf::from(r"\\server\share\x")
+        );
         let volume = r"\\?\Volume{0123abcd}\x";
-        assert_eq!(strip(volume), volume);
-        assert_eq!(strip(r"C:\x"), r"C:\x");
-        assert_eq!(strip(r"\\server\share\x"), r"\\server\share\x");
-        assert_eq!(strip("/photos/trip"), "/photos/trip");
-        // The path the file manager is handed.
+        assert_eq!(openable_path(Path::new(volume)), PathBuf::from(volume));
         assert_eq!(
             openable_path(Path::new(r"\\?\C:\x")),
             PathBuf::from(r"C:\x")
