@@ -203,6 +203,5 @@ The Python app stayed in the tree as the parity reference for hashing and groupi
 - On partly transparent stacks the merged image is the top layer alone, where Photoshop's composite would also show the layers below.
 - The bracketing path of the MakerNote parser has been checked on public bracket sets, not yet on the owner's own camera files.
 - Names in scripts the Inter font does not cover (CJK, Arabic, Hebrew, Thai) are drawn with the system's fonts, and as empty boxes where the system has no font for their script. A right-to-left name of several words, or with digits or Latin letters inside it, shows its parts in the wrong order.
-- egui looks up a system font on the UI thread, opening and mapping font files there, the first time a character no font has is drawn: whether that should stay, or move off the UI thread with the framework's fallback turned off.
 
 The rules for working in the repository are in [../AGENTS.md](../AGENTS.md).
