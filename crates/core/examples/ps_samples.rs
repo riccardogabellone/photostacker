@@ -1055,8 +1055,14 @@ fn human_size(bytes: u64) -> String {
     )
 }
 
-#[cfg(all(test, unix))]
+// The tests of the folder guard (`clear`, `clear_sources`) are Unix only: on
+// Windows the guard refuses every ordinary path by design, since a canonical
+// path there is verbatim (`\\?\`) and never equals it (see `clear`), and these
+// tests build their paths with `/`, which a verbatim path takes literally. The
+// example runs from WSL, like every cargo command. The other tests run everywhere.
+#[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use std::os::unix::fs::symlink;
 
     use super::*;
@@ -1073,6 +1079,7 @@ mod tests {
         (temp, root, precious)
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_final_link_is_refused() {
         let (_temp, root, precious) = root_with_victim();
@@ -1082,6 +1089,7 @@ mod tests {
         assert!(precious.exists());
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_final_link_with_a_trailing_slash_is_refused() {
         let (_temp, root, precious) = root_with_victim();
@@ -1092,6 +1100,7 @@ mod tests {
         assert!(precious.exists());
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_linked_intermediate_folder_is_refused() {
         let (_temp, root, _) = root_with_victim();
@@ -1105,6 +1114,7 @@ mod tests {
         assert!(precious.exists());
     }
 
+    #[cfg(unix)]
     #[test]
     fn another_folder_is_refused() {
         let (_temp, root, precious) = root_with_victim();
@@ -1113,6 +1123,7 @@ mod tests {
         assert!(precious.exists());
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_real_folder_loses_only_its_regular_files() {
         let (_temp, root, _) = root_with_victim();
@@ -1135,6 +1146,7 @@ mod tests {
         assert_eq!(size_text(&root.join("missing.psd")), "?");
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_missing_folder_is_created() {
         let (_temp, root, _) = root_with_victim();
@@ -1143,6 +1155,7 @@ mod tests {
         assert!(dir.is_dir());
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_sources_folder_is_created_then_loses_only_its_regular_files() {
         let (_temp, root, _) = root_with_victim();
@@ -1158,6 +1171,7 @@ mod tests {
         assert!(sources.join("sub").is_dir());
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_linked_sources_folder_is_refused() {
         let (_temp, root, precious) = root_with_victim();
