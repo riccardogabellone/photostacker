@@ -16,6 +16,11 @@ on:
       - "assets/icons/**"
       - "crates/ui/Cargo.toml"
       - "crates/ui/build.rs"
+      # scripts/smoke.sh reads the lines `photostacker-cli info` prints, and the folders
+      # they name are those the code looks in.
+      - "crates/cli/src/info.rs"
+      - "crates/core/src/package.rs"
+      - "crates/core/src/models/runtime.rs"
       - "scripts/**"
       - "Cargo.lock"
       - ".cargo/**"
