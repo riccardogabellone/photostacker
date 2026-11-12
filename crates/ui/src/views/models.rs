@@ -12,7 +12,7 @@ use egui_material_icons::icons::ICON_WARNING;
 use photostacker_core::engine::{ModelActivity, ModelView};
 
 use crate::controller::{Controller, MlState, ModelFailure, Question};
-use crate::format::{download_percent, mib, needs_macos_text};
+use crate::format::{display_path, download_percent, mib, needs_macos_text};
 use crate::prefs::FormDefaults;
 use crate::theme;
 use crate::views::fields::similarity_field;
@@ -93,7 +93,7 @@ fn content(
             let text = needs_macos_text(state).unwrap_or_else(|| {
                 format!(
                     "ONNX Runtime was not found at {}, so the visual check cannot run.",
-                    check.path.display()
+                    display_path(&check.path)
                 )
             });
             warning(ui, &text);
