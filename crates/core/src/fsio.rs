@@ -603,14 +603,15 @@ mod tests {
         assert!(error.reason.contains("not a directory"), "{error}");
     }
 
-    #[cfg(unix)]
     #[test]
     fn ensure_output_dir_rejects_input_via_symlink() {
         let root = tempfile::tempdir().unwrap();
         let input = root.path().join("photos");
         fs::create_dir(&input).unwrap();
         let link = root.path().join("out");
-        std::os::unix::fs::symlink(&input, &link).unwrap();
+        if !photostacker_testkit::symlink_dir(&input, &link) {
+            return;
+        }
         let mut config = JobConfig::new(input);
         config.output_dir = link.clone();
 

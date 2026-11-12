@@ -1733,7 +1733,6 @@ fn recursive_stacks_mirror_their_subfolder() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn subfolder_link_leaving_the_output_is_refused() {
     // `stacked/a` links out of the output folder: the stacks of `a` and of
@@ -1746,7 +1745,9 @@ fn subfolder_link_leaving_the_output_is_refused() {
     let mut config = JobConfig::new(dir.path().to_path_buf());
     config.recursive = true;
     fs::create_dir(&config.output_dir).unwrap();
-    std::os::unix::fs::symlink(outside.path(), config.output_dir.join("a")).unwrap();
+    if !photostacker_testkit::symlink_dir(outside.path(), &config.output_dir.join("a")) {
+        return;
+    }
     let analysis = analyze_ok(&config);
     assert_eq!(analysis.groups.len(), 3, "{:?}", analysis.groups);
 
@@ -1761,10 +1762,17 @@ fn subfolder_link_leaving_the_output_is_refused() {
     assert_eq!(report.outcomes.len(), 3);
     for (group, outcome) in &report.outcomes {
         match group_folder(&analysis, dir.path(), *group).as_str() {
-            folder @ ("a" | "a/deep") => assert_eq!(
-                outcome.as_ref().unwrap_err(),
-                &format!("the output subfolder {folder} leaves the output folder")
-            ),
+            folder @ ("a" | "a/deep") => {
+                // The error names the subfolder with the system's separator.
+                let rel: PathBuf = folder.split('/').collect();
+                assert_eq!(
+                    outcome.as_ref().unwrap_err(),
+                    &format!(
+                        "the output subfolder {} leaves the output folder",
+                        rel.display()
+                    )
+                );
+            }
             "b" => assert_eq!(
                 file_name(written(outcome.as_ref().unwrap()).0),
                 "IMG_0001_3.psd"

@@ -118,6 +118,8 @@ mod tests {
         );
     }
 
+    // Unix only: on Windows the executable's path is taken as it is, links
+    // and all (see `folder_of`), so there is no link to resolve.
     #[cfg(unix)]
     #[test]
     fn a_link_to_the_executable_finds_the_real_folder() {

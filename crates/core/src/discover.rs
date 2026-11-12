@@ -768,15 +768,17 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
     #[test]
     fn symlinked_dirs_are_not_followed() {
         let dir = tempfile::tempdir().unwrap();
         touch(dir.path(), "sub/d.jpg");
         // A cycle: following it would never end.
         let sub = dir.path().join("sub");
-        std::os::unix::fs::symlink(dir.path(), sub.join("loop")).unwrap();
-        std::os::unix::fs::symlink(dir.path(), sub.join("loop.jpg")).unwrap();
+        for name in ["loop", "loop.jpg"] {
+            if !photostacker_testkit::symlink_dir(dir.path(), &sub.join(name)) {
+                return;
+            }
+        }
         let files = scan(dir.path(), true, &[]);
         assert_eq!(rel_paths(dir.path(), &files), [native("sub/d.jpg")]);
     }

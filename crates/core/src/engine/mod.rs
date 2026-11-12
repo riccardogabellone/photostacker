@@ -836,7 +836,6 @@ mod tests {
         ));
     }
 
-    #[cfg(unix)]
     #[test]
     fn remove_partial_leaves_folders_and_links() {
         let dir = tempfile::tempdir().unwrap();
@@ -844,10 +843,13 @@ mod tests {
         fs::write(&target, b"photo").unwrap();
         let partial = dir.path().join("a_3.psd.partial");
         fs::create_dir(&partial).unwrap();
-        std::os::unix::fs::symlink(&target, dir.path().join("a_3.psd.partial.layers")).unwrap();
+        let link = dir.path().join("a_3.psd.partial.layers");
+        if !photostacker_testkit::symlink_file(&target, &link) {
+            return;
+        }
         assert!(remove_partial(dir.path(), &partial));
         assert!(partial.is_dir());
-        assert!(dir.path().join("a_3.psd.partial.layers").is_symlink());
+        assert!(link.is_symlink());
         assert_eq!(fs::read(&target).unwrap(), b"photo");
     }
 }

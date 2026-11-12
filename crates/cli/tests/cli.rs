@@ -544,11 +544,10 @@ fn run_names_each_per_file_error() {
     fs::write(input.join("aa-cut.jpg"), &whole[..whole.len() / 2]).unwrap();
     fs::write(input.join("zz-garbage.jpg"), b"not a photo at all").unwrap();
     let mut failed = vec!["aa-cut.jpg"];
-    // A dangling symlink is an entry the scan cannot read.
-    #[cfg(unix)]
-    {
-        std::os::unix::fs::symlink(root.path().join("gone.jpg"), input.join("mm-dangling.jpg"))
-            .unwrap();
+    // A dangling symlink is an entry the scan cannot read; where the account
+    // may not make one, the rest of the test still runs.
+    let gone = root.path().join("gone.jpg");
+    if photostacker_testkit::symlink_file(&gone, &input.join("mm-dangling.jpg")) {
         failed.push("mm-dangling.jpg");
     }
     failed.push("zz-garbage.jpg");

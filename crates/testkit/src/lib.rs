@@ -4,11 +4,13 @@
 //! a local HTTP server for the model downloader,
 //! a tiny hand-encoded ONNX model for the embedder,
 //! folders of bracketed and lone photos for the engine and the app,
-//! and sparse files, large but costing no disk.
+//! sparse files, large but costing no disk,
+//! and symbolic links where the system lets the account make them.
 
 pub mod colour;
 pub mod files;
 pub mod http;
+pub mod links;
 pub mod onnx;
 pub mod photos;
 pub mod psd_reader;
@@ -18,6 +20,7 @@ pub mod tiff_builder;
 
 pub use colour::{cmyk_jpeg_with_icc, icc_stub};
 pub use files::sparse_file;
+pub use links::{symlink_dir, symlink_file};
 pub use raw_containers::{
     CANON_CR3_UUID, CR3_PREVIEW_UUID, RAF_MAGIC, UNKNOWN_MAKE, UNKNOWN_MODEL, cr3_with_cmt,
     cr3_with_prvw, encode_jpeg, raf_with_jpeg, tiff_raw_with_jpegs,
