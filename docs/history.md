@@ -179,7 +179,7 @@ The Python app stayed in the tree as the parity reference for hashing and groupi
 - **One full-resolution layer in memory at a time.** Each layer is decoded, compressed to a spill file and freed before the next, which keeps large brackets within memory.
 - **Never overwrite.** Stacks are written as `.partial` and hard-linked to a free name, into `<input>/stacked` by default, which the scan always skips.
 - **Stand-in readers instead of Photoshop.** The development machine has no Photoshop, so GIMP, PhotoCraft and Photopea, written independently of the writers, gate the files; Photoshop itself is to open them before the first public release.
-- **No GPL dependency.** The app is MIT; LGPL is allowed only for rawler and libheif/libde265, and a test fails if libheif links a GPL encoder such as x265.
+- **No GPL dependency.** The app is MIT; LGPL is allowed only for rawler, for libheif/libde265, and in one third, known case: the code that the `wayland-protocols-plasma` crate (declared MIT; the window toolkit brings it in on Linux) generates from KDE's Wayland protocol files, 17 of them marked LGPL-2.1-or-later, which [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md) discloses. A test fails if libheif links a GPL encoder such as x265.
 
 ## Still open
 
@@ -204,6 +204,5 @@ The Python app stayed in the tree as the parity reference for hashing and groupi
 - The bracketing path of the MakerNote parser has been checked on public bracket sets, not yet on the owner's own camera files.
 - Names in scripts the Inter font does not cover (CJK, Arabic, Hebrew, Thai) are drawn with the system's fonts, and as empty boxes where the system has no font for their script. A right-to-left name of several words, or with digits or Latin letters inside it, shows its parts in the wrong order.
 - egui looks up a system font on the UI thread, opening and mapping font files there, the first time a character no font has is drawn: whether that should stay, or move off the UI thread with the framework's fallback turned off.
-- Whether the project's licence rule should name the KDE Wayland protocol files that the Linux app's window toolkit brings in through a crate declared MIT, 17 of which their authors mark LGPL-2.1-or-later. Today [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md) discloses them.
 
 The rules for working in the repository are in [../AGENTS.md](../AGENTS.md).

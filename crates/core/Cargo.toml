@@ -40,7 +40,8 @@ libloading = { workspace = true, optional = true }
 ort = { workspace = true, optional = true }
 # The per-file pool of `analyze`; rawler already depends on it.
 rayon.workspace = true
-# Camera RAW decoding (LGPL-2.1, the one LGPL dependency allowed besides libheif).
+# Camera RAW decoding (LGPL-2.1, the one crate allowed to declare the LGPL; AGENTS.md's
+# licence rule names every LGPL case the project allows).
 rawler.workspace = true
 # The store (`store`): SQLite, its migrations, and sqlite-vec for the embeddings.
 # `fallible_uint`: u64 and usize columns, with a range check instead of a cast.
