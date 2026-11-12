@@ -41,10 +41,7 @@ fn write_replace_with(path: &Path, bytes: &[u8], sync: SyncDir) -> io::Result<()
         _ => {}
     }
     // A partial that cannot be created is not ours: it stays.
-    let file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&partial)?;
+    let file = create_new(&partial)?;
     let result = write_synced(file, bytes).and_then(|()| fs::rename(&partial, path));
     if result.is_err() {
         let _ = fs::remove_file(&partial);
@@ -125,6 +122,33 @@ fn write_synced(mut file: File, bytes: &[u8]) -> io::Result<()> {
     file.sync_all()
 }
 
+/// Creates the file `path`, open to read and write, only if nothing is at
+/// that name: a name that is taken fails with `AlreadyExists`, on every
+/// system, so the writers move on to the next name. Windows refuses to create
+/// a file where a folder is with `ERROR_ACCESS_DENIED`, which would read as a
+/// permission problem and fail the stack; there, a refusal at a name that is
+/// taken is `AlreadyExists` too.
+pub(crate) fn create_new(path: &Path) -> io::Result<File> {
+    let created = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(path);
+    match created {
+        #[cfg(windows)]
+        Err(error)
+            if error.kind() == io::ErrorKind::PermissionDenied
+                && fs::symlink_metadata(path).is_ok() =>
+        {
+            Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!("{} already exists", path.display()),
+            ))
+        }
+        created => created,
+    }
+}
+
 /// `<path>.partial`.
 fn partial_path(path: &Path) -> PathBuf {
     with_suffix(path, ".partial")
@@ -158,11 +182,7 @@ impl PartialFile {
     /// partial already exists (an earlier crash, or another writer).
     pub fn create(final_path: &Path) -> io::Result<Self> {
         let path = partial_path(final_path);
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .open(&path)?;
+        let file = create_new(&path)?;
         Ok(Self {
             path,
             file: Some(file),
@@ -571,6 +591,20 @@ mod tests {
             fs::read(dir.path().join("a.psd.partial")).unwrap(),
             b"crashed"
         );
+    }
+
+    #[test]
+    fn a_folder_at_the_partial_s_name_is_a_taken_name() {
+        // Windows refuses to create a file where a folder is as if access
+        // were denied; the name is taken all the same, so a writer moves on
+        // to the next one instead of failing.
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("a.psd.partial");
+        fs::create_dir(&folder).unwrap();
+        let error = PartialFile::create(&dir.path().join("a.psd")).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::AlreadyExists, "{error}");
+        assert!(folder.is_dir());
+        assert_eq!(entries(dir.path()), ["a.psd.partial"]);
     }
 
     #[test]

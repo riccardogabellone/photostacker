@@ -26,7 +26,7 @@
 //!
 //! All multi-byte values are big-endian.
 
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
@@ -36,7 +36,7 @@ use rayon::prelude::*;
 
 use super::{Compression16, WriteOptions};
 use crate::decode::{FullImage, Samples};
-use crate::fsio::with_suffix;
+use crate::fsio::{create_new, with_suffix};
 use crate::group::{CanvasProfile, Container};
 
 /// PSD compression code of PackBits RLE.
@@ -572,12 +572,10 @@ struct SpillFile {
 
 impl SpillFile {
     /// Creates `path`, which must not exist: a leftover from an earlier run
-    /// is not ours to reuse, or to remove.
+    /// is not ours to reuse, or to remove (`AlreadyExists`, whatever is at
+    /// the name: [`create_new`]).
     fn create(path: PathBuf) -> io::Result<Self> {
-        let file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)?;
+        let file = create_new(&path)?;
         Ok(Self {
             path,
             file: Some(file),
