@@ -138,7 +138,7 @@ The first run also builds the HEIC decoder (libheif and libde265) with vcpkg, wh
 
 ### macOS
 
-These steps are the ones the project's workflows run on GitHub's macOS runners; no one has followed them on a Mac of their own yet. You need Xcode's command line tools, and cmake and pkg-config (here from [Homebrew](https://brew.sh)). `<prefix>` is the absolute path of any folder outside the repository.
+These steps follow what the project's workflows do on GitHub's macOS runners; no one has followed them on a Mac of their own yet. You need Xcode's command line tools, and cmake and pkg-config (here from [Homebrew](https://brew.sh)). `<prefix>` is the absolute path of any folder outside the repository.
 
 ```sh
 xcode-select --install
