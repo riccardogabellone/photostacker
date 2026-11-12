@@ -80,8 +80,11 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         with:
-          # cargo does not build libheif again when only its toolchain file changes.
-          key: libheif-${{ hashFiles('packaging/cmake/libheif.cmake') }}
+          # cargo does not build libheif-sys again when only libheif's toolchain file
+          # changes, or the pin of libde265 (Linux, macOS) or of vcpkg's libheif and libde265
+          # (Windows): a cached build would keep a libheif compiled against the old headers,
+          # or the old link lines.
+          key: libheif-${{ hashFiles('packaging/cmake/libheif.cmake', 'scripts/libde265.sh', 'scripts/windows-heif.ps1') }}
           # A failed job keeps the tools and dependencies it built for the next run.
           cache-on-failure: true
 
