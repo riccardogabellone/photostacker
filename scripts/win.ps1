@@ -221,6 +221,19 @@ function Install-Heif {
     return $root
 }
 
+# Gives the environment variable $name back the $value it had, or removes it when it had
+# none ($null). Not SetEnvironmentVariable with $null: PowerShell passes it as "", and .NET
+# then keeps an empty variable, which cargo reads as set (an empty target folder, or an
+# empty ORT_DYLIB_PATH for whatever the session starts next).
+function Restore-Variable([string] $name, $value) {
+    if ($null -eq $value) {
+        Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
+    }
+    else {
+        [System.Environment]::SetEnvironmentVariable($name, $value)
+    }
+}
+
 # Runs cargo with $arguments, from the repository whatever the current folder is, with the
 # script's variables set for it alone: the caller's values, or their absence, are put back.
 # Returns cargo's exit code.
@@ -244,7 +257,7 @@ function Invoke-Cargo([string] $vcpkgRoot, [string[]] $arguments) {
     finally {
         Pop-Location
         foreach ($name in $saved.Keys) {
-            [System.Environment]::SetEnvironmentVariable($name, $saved[$name])
+            Restore-Variable $name $saved[$name]
         }
     }
 }

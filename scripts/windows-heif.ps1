@@ -87,6 +87,18 @@ function Get-CheckedOutCommit {
     return $commit
 }
 
+# Gives the environment variable $name back the $value it had, or removes it when it had
+# none ($null). Not SetEnvironmentVariable with $null: PowerShell passes it as "", and .NET
+# then keeps an empty variable, which cargo and vcpkg read as set.
+function Restore-Variable([string] $name, $value) {
+    if ($null -eq $value) {
+        Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
+    }
+    else {
+        [System.Environment]::SetEnvironmentVariable($name, $value)
+    }
+}
+
 # Runs vcpkg with $arguments in $Root, with VCPKG_ROOT at $Root and without
 # CMAKE_TOOLCHAIN_FILE; the caller's values, or their absence, are put back. It prints what
 # vcpkg says, or with -Capture returns it, and stops if vcpkg fails, saying what it was doing.
@@ -112,7 +124,7 @@ function Invoke-Vcpkg([string] $doing, [string[]] $arguments, [switch] $Capture)
     finally {
         Pop-Location
         foreach ($name in $saved.Keys) {
-            [System.Environment]::SetEnvironmentVariable($name, $saved[$name])
+            Restore-Variable $name $saved[$name]
         }
     }
     if ($Capture) {
