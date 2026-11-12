@@ -37,8 +37,9 @@ fn main() -> eframe::Result {
             platform: Arc::new(Native),
             embedder: None,
             installer: None,
-            // Looked for once, before the first frame: the app reads no file on the UI thread
-            // after (egui's own system-font lookup aside: crates/ui/DESIGN.md, Typography).
+            // Looked for once, before the first frame: the app reads no file on the UI
+            // thread after (the rule and its exceptions: crates/ui/DESIGN.md, State and
+            // the engine).
             runtime: RuntimeCheck::look(),
             licences: platform::licences_folder(),
         })
