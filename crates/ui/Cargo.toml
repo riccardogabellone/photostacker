@@ -123,6 +123,16 @@ resources = [{ src = "../../dist/package/resources", target = "." }]
 frameworks = ["../../dist/package/frameworks/libonnxruntime.dylib"]
 # The oldest macOS the app runs on, as MACOSX_DEPLOYMENT_TARGET in .cargo/config.toml.
 minimum-system-version = "11.0"
+# An ad-hoc signature: no certificate, no Apple account, no notarisation. It seals the
+# app. Without it nothing does, and the Apple-silicon executables carry only the linker's
+# own signature, which by Apple's release notes does not pass Gatekeeper. The packager
+# signs every Mach-O file in the app (ONNX Runtime's library too, in place of any
+# signature it came with), then the app, then the disk image.
+signing-identity = "-"
+# The packager always signs with the hardened runtime, under which macOS loads only the
+# libraries of the app's own signer and Apple's. An ad-hoc signature names no signer, so
+# ONNX Runtime's library would not load: this file's one entitlement turns that check off.
+entitlements = "../../packaging/macos/entitlements.plist"
 
 # The generated desktop entry and icons are named after the binary, but the desktop
 # matches a window to its launcher by the app ID (src/identity.rs), so the packages

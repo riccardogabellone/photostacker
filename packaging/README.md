@@ -75,6 +75,7 @@ These install nothing. For each package, `scripts/smoke.sh` unpacks it in a scra
 - **contents:** both executables, ONNX Runtime's library and the eight licence files where the app looks for them; in the AppImage no libde265 library, since libde265 is built in;
 - **links:** on Linux each executable links only the C and C++ runtimes (one that needs `libde265.so.0` was built against the system's libde265, and the failure says how to build it with the pinned one); on macOS only libraries under `/usr/lib/` and `/System/Library/`; on Windows every Visual C++ runtime DLL that the two executables and ONNX Runtime name is beside them (a development machine or a runner has them all in System32, so only this check shows one missing, as a clean Windows has none), no libheif, libde265 or x265 DLL is in the package, and the tool runs with only Windows' own folders on the `PATH`;
 - **macOS:** every Mach-O file needs macOS 11.0, but ONNX Runtime on Apple silicon, which needs 14.0;
+- **signature:** on macOS the app is sealed by a valid ad-hoc signature, nested code included (`codesign --verify --deep --strict`), and both executables carry the entitlement that lets them load ONNX Runtime's library (Signing, below);
 - **runs:** with `ORT_DYLIB_PATH` unset and a scratch data folder, `photostacker-cli info` names the version in the package's file name, libde265 as the HEVC decoder, and the ONNX Runtime pinned for the system, loaded from the package; a dry run over `crates/core/tests/fixtures/heic` reads every HEIC file there, with no error.
 
 Each check prints one line; the first that fails says what it expected and what it found, and the script exits 1.
@@ -97,9 +98,16 @@ The desktop matches a running window to its launcher and icon by the app ID, `io
 
 The AppImage tooling looks for the desktop entry under the main binary's name, so the AppImage holds the same file as `Photostacker.desktop`. Tests in `identity.rs` check that the desktop entry, the AppStream file and the packager's configuration agree with the app's name, ID and executable.
 
-## Not signed
+## Signing
 
-The packages are not code-signed, so on macOS and Windows the first start asks for one more step: the README's [Installing](../README.md#installing) gives it for each system, and on macOS for each of the two messages the system may show (the `xattr` command when it says the app is damaged, "Open Anyway" when it says the developer cannot be verified). Signing needs an Apple Developer ID (with notarisation) and a Windows code-signing certificate; cargo-packager has `macos.signing-identity` and `windows.sign-command` for them.
+No package is signed by a developer's identity, and nothing is notarised. The Linux and Windows packages carry no signature. The macOS app carries an ad-hoc signature, which needs no certificate and no Apple account:
+
+- `signing-identity = "-"` in `[package.metadata.packager.macos]` makes the packager sign every Mach-O file in the app (both executables, and ONNX Runtime's library in place of any signature it came with), then the app, which seals it, then the disk image. Without it only the linker's own signature is on the Apple-silicon executables, and nothing seals the app.
+- cargo-packager 0.11.8 always signs with the hardened runtime, under which macOS loads only libraries signed by Apple or by the app's own team. An ad-hoc signature has no team, so [packaging/macos/entitlements.plist](macos/entitlements.plist) holds the one entitlement that turns that check off, `com.apple.security.cs.disable-library-validation`: with it the app loads ONNX Runtime's library, from the app or from `ORT_DYLIB_PATH`.
+- `scripts/package.sh` unsets the `APPLE_*` variables from which the packager would take a certificate or notarisation credentials, so a machine that signs other apps never sends this one to Apple's notary service.
+- `scripts/smoke.sh` checks that the signature is valid and seals the app, nested code included, that it is ad hoc, and that both executables carry the entitlement; its run of the command-line tool from the disk image then loads ONNX Runtime under that signature.
+
+On macOS and Windows the first start still asks for one more step: the README's [Installing](../README.md#installing) gives it for each system, and on macOS for each of the two messages the system may show ("Open Anyway" when it says the developer cannot be verified, the `xattr` command when it says the app is damaged). Which of the two a Mac shows for the downloaded app has not been seen on a Mac yet. Signing with an identity needs an Apple Developer ID (with notarisation) and a Windows code-signing certificate; cargo-packager has `macos.signing-identity` and `windows.sign-command` for them.
 
 ## The AppImage and FUSE
 

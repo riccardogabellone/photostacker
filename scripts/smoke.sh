@@ -41,7 +41,10 @@
 #              and the tool runs with a PATH of Windows' own folders only
 #   macOS      the minimum macOS of every Mach-O file: 11.0, but 14.0 for ONNX Runtime on
 #              Apple silicon
-#   runs       `photostacker-cli info` names the version in the package's name, libde265,
+#   signature  macOS: the app is sealed by a valid ad-hoc signature, nested code included,
+#              and both executables carry the entitlement that lets them load ONNX
+#              Runtime's library under the hardened runtime (crates/ui/Cargo.toml)
+#   runs`photostacker-cli info` names the version in the package's name, libde265,
 #              and the ONNX Runtime of scripts/onnxruntime.tsv for this system, loaded from
 #              the package; `photostacker-cli run crates/core/tests/fixtures/heic --dry-run`
 #              succeeds, and its plan lists every HEIC file there, with no error
@@ -51,7 +54,7 @@
 # in the scratch folder, which is removed at the end.
 #
 # Needs: Linux: dpkg, objdump (binutils); apt-get for --install. macOS: hdiutil,
-# otool, file. Windows (Git Bash): cygpath, PowerShell for the zip and the MSI, msiexec.exe,
+# otool, file, codesign. Windows (Git Bash): cygpath, PowerShell for the zip and the MSI, msiexec.exe,
 # and reg.exe and tasklist.exe for --install.
 #
 # macOS has bash 3.2 and BSD tools: no associative arrays, no mapfile, no readlink -f.
@@ -427,6 +430,40 @@ EOF
     fi
 }
 
+# macOS: the app is sealed by an ad-hoc signature, which crates/ui/Cargo.toml asks the
+# packager for (without it nothing seals the app, and the linker's own signature on the
+# Apple-silicon executables does not pass Gatekeeper, by Apple's release notes). The packager
+# signs with the hardened runtime, under which macOS loads only libraries signed by Apple or
+# by the app's own team, and an ad-hoc signature has no team: so each executable must carry
+# the entitlement of packaging/macos/entitlements.plist, or ONNX Runtime's library would
+# not load (the runs below load it with photostacker-cli). codesign describes a signature
+# on stderr, and the entitlements on stdout: as text on a recent macOS, as a binary blob
+# with the property list in it on an old one, hence the tr.
+check_signature_macos() {
+    local entitlement=com.apple.security.cs.disable-library-validation
+    local name found
+    command -v codesign >/dev/null 2>&1 ||
+        fail "signature: codesign (the Xcode command line tools) is needed to read the app's signature"
+    found=$(codesign --verify --deep --strict "$root" 2>&1) ||
+        fail "signature: expected a valid signature that seals $root, found: ${found:-codesign failed without a word}"
+    found=$(codesign -dv "$root" 2>&1) ||
+        fail "signature: expected codesign to describe the signature of $root, found: ${found:-it failed without a word}"
+    case "$found" in
+        *Signature=adhoc*) ;;
+        *) fail "signature: expected an ad-hoc signature on $root, found: $(printf '%s\n' "$found" | grep -E '^(Signature|Authority|TeamIdentifier)' | tr '\n' ' ')" ;;
+    esac
+    ok "signature: the app is sealed by a valid ad-hoc signature, nested code included"
+    for name in Photostacker photostacker-cli; do
+        found=$(codesign -d --entitlements - "$bin_dir/$name" 2>/dev/null | tr -d '\0') ||
+            fail "signature: expected codesign to read the entitlements of $bin_dir/$name, found it failed"
+        case "$found" in
+            *"$entitlement"*) ;;
+            *) fail "signature: expected $name to carry the entitlement $entitlement, found ${found:-none}: without it the hardened runtime refuses ONNX Runtime's library" ;;
+        esac
+    done
+    ok "signature: both executables carry $entitlement"
+}
+
 # Runs photostacker-cli of the package with its arguments, as the package would: on Windows
 # with only Windows' own folders on the PATH, from an AppImage's tree with its libraries.
 run_cli() {
@@ -662,6 +699,7 @@ for package in "${packages[@]}"; do
         macos)
             check_links_macos
             check_minimum_macos
+            check_signature_macos
             ;;
         windows) check_links_windows ;;
     esac

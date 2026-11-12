@@ -18,7 +18,9 @@
 #    frameworks/. The packager copies resources/ into the package's resource folder at the
 #    same paths (crates/ui/Cargo.toml).
 # 3. Runs `cargo packager` from crates/ui, whose Cargo.toml holds the configuration, into
-#    dist/packages.
+#    dist/packages. On macOS the packager signs the app ad hoc, which needs no certificate;
+#    the variables it would take a certificate or notarisation credentials from are unset
+#    first.
 # 4. On Windows, zips the app's folder too: Photostacker_<version>_x64-portable.zip.
 #
 # dist/package and dist/packages are emptied first, so a package never carries a stale file
@@ -167,6 +169,15 @@ case "$os" in
         cp -L "$library" "$stage/frameworks/libonnxruntime.dylib"
         ;;
 esac
+
+if [ "$os" = macos ]; then
+    # The app is signed ad hoc (crates/ui/Cargo.toml): no certificate, and nothing Apple
+    # would notarise. With these variables set, as on a machine that signs other apps,
+    # cargo-packager 0.11.8 would import their certificate into a keychain and send the
+    # app to Apple's notary service: they are not for this build.
+    unset APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_KEYCHAIN_PROFILE \
+        APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID APPLE_API_KEY APPLE_API_ISSUER APPLE_API_KEY_PATH
+fi
 
 echo "Packaging $formats into $out" >&2
 # --binaries-dir names the folder that cargo-packager 0.11.8 also finds by itself, from
