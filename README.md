@@ -14,9 +14,8 @@ It is a desktop app and a command-line tool. It works offline, only reads your p
 
 Photostacker is at version 0.1.0. There is no release yet, so for now it is built from source.
 
-- The tests pass on Linux and on Windows.
-- The Linux packages have been built and checked. The Windows and macOS packages have not been built yet.
-- The macOS build has not been run yet.
+- The tests pass on Linux, on Windows and on macOS (Apple silicon and Intel).
+- The packages for the three systems are built and checked by the project's workflows: their contents, what they link, and a run of the command-line tool from each. No person has installed and started the Windows and macOS packages yet, and on macOS the app itself has not been opened yet: only its tests and the command-line tool have run there.
 - Photoshop itself has not opened the files yet. Three other programs have (GIMP, PhotoCraft and Photopea): see [docs/photoshop-checks.md](docs/photoshop-checks.md).
 - Names in scripts other than Latin, Greek and Cyrillic (Chinese, Japanese, Korean, Arabic, Hebrew, Thai) are drawn with your system's fonts, which may look lighter or smaller than the text around them, and as empty boxes where the system has no font for their script. Arabic and Hebrew words read correctly, but a name of several words, or one with digits or Latin letters inside it, shows its parts in the wrong order.
 
@@ -139,7 +138,7 @@ The first run also builds the HEIC decoder (libheif and libde265) with vcpkg, wh
 
 ### macOS
 
-The macOS build has not been run yet: these steps follow what the project's workflows do. You need Xcode's command line tools, and cmake and pkg-config (here from [Homebrew](https://brew.sh)). `<prefix>` is the absolute path of any folder outside the repository.
+These steps are the ones the project's workflows run on GitHub's macOS runners; no one has followed them on a Mac of their own yet. You need Xcode's command line tools, and cmake and pkg-config (here from [Homebrew](https://brew.sh)). `<prefix>` is the absolute path of any folder outside the repository.
 
 ```sh
 xcode-select --install
