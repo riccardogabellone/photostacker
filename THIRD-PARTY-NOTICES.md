@@ -324,11 +324,11 @@ commands its `AGENTS.md` documents; a `[patch.crates-io]` entry in
 
 The visual check runs its model on Microsoft's ONNX Runtime
 (https://github.com/microsoft/onnxruntime), under the MIT licence. It is a
-shared library the package carries, unchanged: beside the executable on
-Windows, in `usr/lib/Photostacker` on Linux, in the app's `Frameworks` folder
-on macOS. On macOS one thing in it changes: the app's ad-hoc code signature
-takes the place of any signature the library came with. The build each
-system gets is pinned in `scripts/onnxruntime.tsv`.
+shared library the package carries, unchanged but for its code signature on
+macOS (the app's ad-hoc signature takes the place of any it came with): beside
+the executable on Windows, in `usr/lib/Photostacker` on Linux, in the app's
+`Frameworks` folder on macOS. The build each system gets is pinned in
+`scripts/onnxruntime.tsv`.
 Its own `LICENSE` and `ThirdPartyNotices.txt` ship beside this file as
 `onnxruntime-LICENSE.txt` and `onnxruntime-ThirdPartyNotices.txt`.
 

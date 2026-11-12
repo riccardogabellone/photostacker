@@ -123,14 +123,16 @@ resources = [{ src = "../../dist/package/resources", target = "." }]
 frameworks = ["../../dist/package/frameworks/libonnxruntime.dylib"]
 # The oldest macOS the app runs on, as MACOSX_DEPLOYMENT_TARGET in .cargo/config.toml.
 minimum-system-version = "11.0"
-# An ad-hoc signature: no certificate, no Apple account, no notarisation. It seals the
-# app. Without it nothing does, and the Apple-silicon executables carry only the linker's
-# own signature, which by Apple's release notes does not pass Gatekeeper. The packager
-# signs every Mach-O file in the app (ONNX Runtime's library too, in place of any
-# signature it came with), then the app, then the disk image.
+# An ad-hoc signature: no certificate, no Apple account, no notarisation. What it adds is
+# the seal over the app, its Info.plist, its resources and its nested code: without it
+# nothing seals the app, and the Apple-silicon executables carry only the linker's own
+# signature. Neither signature names an identity, so neither passes Gatekeeper: the first
+# start still asks the user (README, Installing). The packager signs every Mach-O file in
+# the app (ONNX Runtime's library too, in place of any signature it came with), then the
+# app, then the disk image.
 signing-identity = "-"
-# The packager always signs with the hardened runtime, under which macOS loads only the
-# libraries of the app's own signer and Apple's. An ad-hoc signature names no signer, so
+# The packager always signs with the hardened runtime, under which macOS loads only
+# libraries signed by Apple or by the app's own team. An ad-hoc signature has no team, so
 # ONNX Runtime's library would not load: this file's one entitlement turns that check off.
 entitlements = "../../packaging/macos/entitlements.plist"
 

@@ -189,7 +189,7 @@ The Python app stayed in the tree as the parity reference for hashing and groupi
 - No reader has confirmed the layers of a BigTIFF.
 - The release's own steps have not run yet: the check of the tag, the build-provenance attestations, the checksums and the draft release first run with the first tag.
 - No person has installed and started the Windows and macOS packages yet, and on macOS the app itself has never been opened: its tests and the command-line tool have run there, on GitHub's runners.
-- No package is signed by a developer's identity or notarised (the macOS app carries an ad-hoc signature), so Windows and macOS ask for one more step at the first start. Which message a Mac shows for the downloaded app has not been seen on a Mac yet.
+- No package is signed by a developer's identity or notarised (the macOS app carries an ad-hoc signature), so Windows and macOS ask for one more step at the first start. Which message a Mac shows for the downloaded app has not been seen on a Mac yet, and no model has run from a signed macOS package: the package check loads ONNX Runtime there and reads its version.
 - The `models-v1` release, the model registry's fallback for the downloads, does not exist yet.
 - Files the tests do not cover yet: a tiled iPhone HEIC; portrait RW2, PEF, DNG and 3FR files; the full-size preview of a CR3; a HEIC whose colour is described only by an `nclx` box; Sony A7R III pixel shift, and whether it reads as an exposure bracket; P/1 and CMYK stills; the orientation in a PNG's `eXIf` chunk.
 - The EXIF golden files' tooling: pinning ExifTool's version, keeping its error records, a guard in the fetch script, and failing when a fixture folder is named but missing. The tests on the public camera files do not run in CI.
