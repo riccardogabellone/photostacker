@@ -1,9 +1,13 @@
-# The actions the workflows use, pinned to commits: one pull request a month moves them
-# all, with the version comments beside the commits.
+# The actions the workflows and the shared build inputs use, pinned to commits: once a
+# month, one grouped pull request per folder moves them, with the version comments beside
+# the commits. "/" covers .github/workflows and an action.yml at the root only, so the
+# composite action's folder is named too.
 version: 2
 updates:
   - package-ecosystem: github-actions
-    directory: /
+    directories:
+      - "/"
+      - "/.github/actions/build-inputs"
     schedule:
       interval: monthly
     groups:
