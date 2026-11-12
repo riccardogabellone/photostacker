@@ -18,7 +18,7 @@ Photostacker is at 0.1.0 and has no installers yet: for now it is built from sou
 - On Windows a script builds the app and the command-line tool, HEIC support included, and the tests pass there too.
 - Nothing has been built or run on macOS yet.
 - Photoshop itself has not opened the files yet. Three other readers have (GIMP, PhotoCraft and Photopea): see [docs/photoshop-checks.md](docs/photoshop-checks.md).
-- Names in scripts other than Latin, Greek and Cyrillic (Chinese, Japanese, Korean, Arabic, Hebrew, Thai) are drawn with your system's fonts, and as empty boxes where the system has no font for their script. Arabic and Hebrew read correctly word by word, but a name of several words shows its words in the wrong order.
+- Names in scripts other than Latin, Greek and Cyrillic (Chinese, Japanese, Korean, Arabic, Hebrew, Thai) are drawn with your system's fonts, which may look lighter or smaller than the text around them, and as empty boxes where the system has no font for their script. Arabic and Hebrew words read correctly, but a name of several words, or one with digits or Latin letters inside it, shows its parts in the wrong order.
 
 ## How it works
 

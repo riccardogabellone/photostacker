@@ -31,7 +31,8 @@ crossbeam-channel.workspace = true
 # copied in another program pastes into a field, and the About card's addresses copy out.
 # `system_fonts`: a character none of the app's fonts has (Chinese, Japanese, Korean,
 # Arabic, Hebrew, Thai…) is drawn with a font installed on the system, found when it is
-# first drawn, behind Inter and egui's own fonts (crates/ui/DESIGN.md, Typography).
+# first drawn, behind Inter, egui's own fonts and the icon font (crates/ui/DESIGN.md,
+# Typography).
 eframe = { workspace = true, features = ["accesskit", "clipboard", "default_fonts", "system_fonts", "wayland", "x11"] }
 egui-notify.workspace = true
 egui_material_icons.workspace = true
@@ -157,6 +158,10 @@ depends = [
     "libxcursor1",
     "libxi6",
     "libxrandr2",
+    # Loaded at run time by name too, by the lookup of a system font for a script the
+    # app's fonts lack (fontique, through eframe's `system_fonts`): without it the app
+    # runs, and names in those scripts are drawn as boxes.
+    "libfontconfig1",
 ]
 
 [package.metadata.packager.deb.files]

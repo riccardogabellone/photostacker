@@ -83,7 +83,7 @@ node scripts/standins/standins.mjs --photocraft <folder>/photocraft-cli.exe  # t
 - Keep functions small and focused on a single task.
 - Every job parameter lives in `JobConfig` and is validated there, once, by `JobConfig::validate()`; the rest of the code trusts a validated config.
 - The core never depends on the UI: `photostacker-core` must not depend on egui or clap.
-- After start-up, the UI thread never calls the engine and does no file I/O: both go through the backend thread.
+- After start-up, the UI thread never calls the engine and the app's code on it does no file I/O: both go through the backend thread, or a thread of their own. The one exception is egui's own lookup of a system font the first time a script is drawn (`crates/ui/DESIGN.md`, Typography); it is the framework's, and no reason to read a file on the UI thread.
 - Record each UI design choice in `crates/ui/DESIGN.md`. Colours come from `theme::Palette` only, and every interactive widget names itself (`WidgetInfo`).
 - The EXIF and MakerNote reader is the project's own: do not add exiftool, exiftool-rs, kamadak-exif or nom-exif.
 - Licence: MIT. No GPL dependency. LGPL is allowed only for `rawler` (2.1) and libheif/libde265 (3.0) through `libheif-rs`. `just deny` checks the licences, the advisories, the banned crates and the sources against [deny.toml](deny.toml): run it when a dependency is added or updated.
