@@ -12,7 +12,7 @@ It is a desktop app and a command-line tool. It works offline, only reads your p
 
 ## Status
 
-Photostacker is at version 0.1.0. There is no release yet, so for now it is built from source.
+Photostacker is at version 0.1.0, its first release: the packages are on the [releases page](https://github.com/riccardogabellone/photostacker/releases).
 
 - The tests pass on Linux, on Windows and on macOS (Apple silicon and Intel).
 - The packages for the three systems are built and checked by the project's workflows: their contents, what they link, and a run of the command-line tool from each. The Linux and Windows packages have also been tried by hand. No person has installed and started the macOS packages yet, and on macOS the app itself has not been opened yet: only its tests and the command-line tool have run there.
@@ -32,7 +32,7 @@ glibc is the C library every Linux distribution has; `ldd --version` prints its 
 
 ## Installing
 
-A release, when there is one, holds these packages on the [releases page](https://github.com/riccardogabellone/photostacker/releases), with a `checksums.txt` of their SHA-256 sums. Every package holds the app, the command-line tool and the visual check's runtime; only the visual check's model is downloaded later, if you turn the check on. The packages are not signed, so on Windows and macOS the first start asks for one more step.
+Each release holds these packages on the [releases page](https://github.com/riccardogabellone/photostacker/releases), with a `checksums.txt` of their SHA-256 sums. Every package holds the app, the command-line tool and the visual check's runtime; only the visual check's model is downloaded later, if you turn the check on. No package is signed by a developer's identity, so on Windows and macOS the first start asks for one more step.
 
 ### Linux
 

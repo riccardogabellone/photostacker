@@ -128,5 +128,5 @@ node scripts/standins/standins.mjs --photocraft <folder>/photocraft-cli.exe  # t
   1. Bump `version` in `[workspace.package]` of the root `Cargo.toml` in a pull request, and merge it.
   2. Tag the merge commit on `main` as `vX.Y.Z`, the new version, and push the tag.
   3. The release workflow checks that the tag is `v` and the workspace's version, builds the packages on four runners (Ubuntu 22.04, Windows, macOS on Apple silicon and on Intel), checks each with `scripts/smoke.sh --install`, attests the build provenance of every file (kept in GitHub's attestation store, not in the release), and creates a draft GitHub release with the packages and `checksums.txt` (their SHA-256).
-  4. Download the packages from the draft and try them on each system. Photoshop opens the sample set before each release (spec §12.5, [docs/photoshop-checks.md](docs/photoshop-checks.md)).
+  4. Download the packages from the draft, whose files only people with write access to the repository can see, and try them on each system. Photoshop opens the sample set before each release (spec §12.5, [docs/photoshop-checks.md](docs/photoshop-checks.md)).
   5. Publish the draft.
