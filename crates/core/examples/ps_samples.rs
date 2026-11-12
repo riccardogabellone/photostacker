@@ -396,8 +396,8 @@ fn parse_args() -> Result<(PathBuf, bool)> {
 /// On Windows the canonical form is a verbatim `\\?\` path, which an
 /// ordinary absolute path never equals, so an ordinary path is refused
 /// there, after a missing folder was created; only a path given in its
-/// verbatim form can pass. The example is meant for WSL, like every cargo
-/// command.
+/// verbatim form can pass. Run it from WSL (`just ps-samples`), or give it
+/// the folder in that form.
 ///
 /// The guard checks paths, not open folders, so two residuals remain. A
 /// link swapped into the path between the check and the removals is
@@ -1055,15 +1055,15 @@ fn human_size(bytes: u64) -> String {
     )
 }
 
-// The tests of the folder guard (`clear`, `clear_sources`) are Unix only: on
-// Windows the guard refuses every ordinary path by design, since a canonical
-// path there is verbatim (`\\?\`) and never equals it (see `clear`), and these
-// tests build their paths with `/`, which a verbatim path takes literally. The
-// example runs from WSL, like every cargo command. The other tests run everywhere.
+// The tests run on every system: their root is canonical, so on Windows a
+// verbatim path, which `clear` accepts (see there). Two are Unix only, each
+// saying why; the link tests skip where the account may not make links.
 #[cfg(test)]
 mod tests {
     #[cfg(unix)]
     use std::os::unix::fs::symlink;
+
+    use photostacker_testkit::symlink_dir;
 
     use super::*;
 
@@ -1079,16 +1079,20 @@ mod tests {
         (temp, root, precious)
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_final_link_is_refused() {
         let (_temp, root, precious) = root_with_victim();
         fs::create_dir_all(root.join("x/dist")).unwrap();
-        symlink(root.join("victim"), root.join("x/dist/ps-check")).unwrap();
+        if !symlink_dir(&root.join("victim"), &root.join("x/dist/ps-check")) {
+            return;
+        }
         assert!(clear(&root.join("x/dist/ps-check")).is_err());
         assert!(precious.exists());
     }
 
+    // Unix only: it is about a trailing `/`, after which Unix follows a final
+    // link; the tests' root is a verbatim path on Windows, in which a `/` is
+    // part of a name, not a separator.
     #[cfg(unix)]
     #[test]
     fn a_final_link_with_a_trailing_slash_is_refused() {
@@ -1100,7 +1104,6 @@ mod tests {
         assert!(precious.exists());
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_linked_intermediate_folder_is_refused() {
         let (_temp, root, _) = root_with_victim();
@@ -1108,13 +1111,14 @@ mod tests {
         fs::create_dir(root.join("victim/ps-check")).unwrap();
         fs::write(&precious, b"keep").unwrap();
         fs::create_dir(root.join("x")).unwrap();
-        symlink(root.join("victim"), root.join("x/dist")).unwrap();
+        if !symlink_dir(&root.join("victim"), &root.join("x/dist")) {
+            return;
+        }
         assert!(clear(&root.join("x/dist/ps-check")).is_err());
         assert!(clear(&root.join("x/dist/ps-check/")).is_err());
         assert!(precious.exists());
     }
 
-    #[cfg(unix)]
     #[test]
     fn another_folder_is_refused() {
         let (_temp, root, precious) = root_with_victim();
@@ -1123,6 +1127,8 @@ mod tests {
         assert!(precious.exists());
     }
 
+    // Unix only: it passes the folder with a trailing `/`, which the tests'
+    // verbatim root on Windows would take as part of the folder's name.
     #[cfg(unix)]
     #[test]
     fn a_real_folder_loses_only_its_regular_files() {
@@ -1146,7 +1152,6 @@ mod tests {
         assert_eq!(size_text(&root.join("missing.psd")), "?");
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_missing_folder_is_created() {
         let (_temp, root, _) = root_with_victim();
@@ -1155,7 +1160,6 @@ mod tests {
         assert!(dir.is_dir());
     }
 
-    #[cfg(unix)]
     #[test]
     fn the_sources_folder_is_created_then_loses_only_its_regular_files() {
         let (_temp, root, _) = root_with_victim();
@@ -1171,13 +1175,14 @@ mod tests {
         assert!(sources.join("sub").is_dir());
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_linked_sources_folder_is_refused() {
         let (_temp, root, precious) = root_with_victim();
         let dir = root.join("x/dist/ps-check");
         clear(&dir).unwrap();
-        symlink(root.join("victim"), dir.join("sources")).unwrap();
+        if !symlink_dir(&root.join("victim"), &dir.join("sources")) {
+            return;
+        }
         assert!(clear_sources(&dir).is_err());
         assert!(precious.exists());
     }
