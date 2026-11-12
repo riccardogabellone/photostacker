@@ -274,8 +274,9 @@ fn file_len_bound(canvas: &CanvasProfile, layout: &Layout, info: &LayerInfo) -> 
 }
 
 /// Fails with `InvalidInput` when a classic TIFF could pass 4 GiB, past the
-/// reach of its 4-byte offsets and counts. Task 7's estimate picks BigTIFF
-/// long before; compression that expands a noisy stack is what is left.
+/// reach of its 4-byte offsets and counts. The canvas profile's size estimate
+/// picks BigTIFF long before; compression that expands a noisy stack is what
+/// is left.
 fn check_classic_len(big: bool, len_bound: u64) -> io::Result<()> {
     if !big && len_bound > u64::from(u32::MAX) {
         return Err(psd::invalid(format!(

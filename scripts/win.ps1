@@ -41,8 +41,8 @@
 # too. Cargo.lock is used as it is (`--locked`). Cargo runs from the repository's folder, so
 # it reads .cargo\config.toml. The variables the script sets (CARGO_TARGET_DIR, VCPKG_ROOT,
 # ORT_DYLIB_PATH, REQUIRE_WINDOWS_ICON) are set for cargo only: the caller's values, or
-# their absence, are put back. The CI Windows runner stays the authoritative Windows build
-# (spec §3).
+# their absence, are put back. The Windows packages are not built here but by
+# scripts/package.sh, on the release workflow's Windows runner (spec §11.3).
 #
 # Before anything else it checks what would otherwise fail late: that neither executable is
 # running from dist\windows (a locked executable would stop the copy half-way), that the

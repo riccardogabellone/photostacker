@@ -1062,8 +1062,8 @@ fn changed_group_resets_to_proposed_with_the_flag() {
     assert_eq!((a.status, a.review_reset), (GroupStatus::Rejected, false));
 
     // Back at the default, b's members were last in a group nobody decided, but
-    // flagged: the stack that replaces it is still to look at again (ruling
-    // T16-b), until it is decided.
+    // flagged: the stack that replaces it is still to look at again, until it
+    // is decided.
     engine.set_thresholds(job, 8, WINDOW, None).unwrap();
     let shrunk = review.group("b_1.jpg");
     assert_eq!(review.names(&shrunk.members), ["b_1.jpg", "b_2.jpg"]);

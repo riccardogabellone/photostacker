@@ -1,7 +1,7 @@
 //! The review thumbnails as egui textures (spec §9.1).
 //!
 //! The engine writes each file's thumbnail as a small JPEG (256 px on the long side) and
-//! the review names its path. The app reads no file on the UI thread, so
+//! the review names its path. After start-up the app reads no file on the UI thread, so
 //! [`ThumbCache::get`] only looks in memory: a thumbnail not there yet is asked of the
 //! loader, one thread that reads and decodes the JPEGs into pixels, and
 //! [`ThumbCache::poll`] turns the pixels into textures at the next frame. Views ask only

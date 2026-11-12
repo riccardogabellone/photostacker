@@ -66,7 +66,8 @@ PERFORMANCE OF THIS SOFTWARE.
 
 ## Inter
 
-The UI typeface is Inter 4.1 (font version 4.001, https://github.com/rsms/inter):
+The UI typeface is Inter 4.1 (font version 4.001,
+https://github.com/rsms/inter):
 
 | Original file | In this tree |
 |---|---|
@@ -252,10 +253,12 @@ How each reaches the packages:
 | libde265 | the system's shared library, `libde265.so.0`: the Debian package depends on it, and the AppImage carries a copy | built in, from vcpkg | built in |
 
 On Linux and macOS the libheif built in is the one the `libheif-sys` version
-in `Cargo.lock` carries (its version is the part after the `+`). On Windows
-both libraries come from the vcpkg commit that `scripts/windows-heif.ps1`
-pins, which names their versions. libheif is built with libde265 as its only
-codec, so no codec under the GPL, such as x265 or x264, is in the packages.
+in `Cargo.lock` carries (its version is the part after the `+`). On macOS
+libde265 is the release that `scripts/libde265.sh` pins, which names its
+version and its SHA-256. On Windows both libraries come from the vcpkg commit
+that `scripts/windows-heif.ps1` pins, which names their versions. libheif is
+built with libde265 as its only codec, so no codec under the GPL, such as x265
+or x264, is in the packages.
 
 The LGPL lets you use changed copies of these libraries with Photostacker.
 Where a library is built in, the app is rebuilt with your copy in its place:
@@ -351,4 +354,5 @@ The visual check's models, DINOv2 small and DINOv2 base, are Meta's DINOv2
 on Hugging Face, under the Apache License 2.0. They are not in the packages:
 the app or the command-line tool downloads one only when the user asks, from
 the addresses in the model registry (`crates/core/src/models/registry.rs`), or
-imports a file the user chooses.
+imports a file the user chooses. The Apache License 2.0's text is in
+`THIRD-PARTY-LICENSES.md`, and at https://www.apache.org/licenses/LICENSE-2.0.

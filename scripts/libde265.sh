@@ -28,8 +28,9 @@
 # have (libde265's template names -lc++ where the C++ library is libc++, as on macOS).
 #
 # Needs curl, cmake, a C and C++ compiler, and the network; on macOS also otool (the
-# Xcode command line tools), and macos-min.sh beside this script. It also runs on Linux, where only the macOS checks are left
-# out. bash 3.2 (macOS): no associative arrays, no mapfile, no ${var,,}.
+# Xcode command line tools), and macos-min.sh beside this script. It also runs on Linux,
+# where only the macOS checks are left out. bash 3.2 (macOS): no associative arrays, no
+# mapfile, no ${var,,}.
 set -euo pipefail
 
 version=1.1.3

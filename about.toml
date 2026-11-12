@@ -554,10 +554,12 @@ checksum = "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90"
 # published when its root held LICENSE.txt, an MIT text ("Copyright (c) Steven
 # Sheldon"). The newer versions of these four names (block2 0.6, objc2 0.6,
 # objc2-app-kit 0.3, objc2-foundation 0.3) were published when the root held
-# only LICENSE.md, which names the licences but holds no text. A
-# clarification applies to every version of a name, so these cannot also take
-# the texts the repository gained later: the tool warns that these
-# clarifications do not match them, and they keep the standard text.
+# only LICENSE.md, which names the licences but holds no text. The repository
+# holds licence texts on its main line since the commit named below, but not
+# at the commits these newer versions were published from. A clarification
+# applies to every version of a name, and these serve the older versions: the
+# tool warns that they do not match the newer ones, which keep the standard
+# text.
 
 [block2.clarify]
 license = "MIT"
@@ -827,5 +829,6 @@ checksum = "a38070a94d4afd9cd710e3ce67bd1de78097cfe1784c1f0109ac95d3c196bfdc"
 # - dispatch 0.2.0 (github.com/SSheldon/rust-dispatch): the repository has no
 #   licence file, at that commit or since.
 # - block2 0.6.2, objc2 0.6.5, objc2-app-kit 0.3.2, objc2-foundation 0.3.2:
-#   objc2's repository has held licence texts since a later commit, but the
+#   objc2's repository holds licence texts on its main line since the commit
+#   named above, but not at the commits these were published from, and the
 #   clarifications of these names serve their older versions (see above).

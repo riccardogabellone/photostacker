@@ -6,9 +6,10 @@
 set dotenv-load
 
 # Microsoft's ONNX Runtime, which the embedder loads at run time (spec §8.3). `just ort`
-# fetches the build that scripts/onnxruntime.tsv pins for this system (Linux x64, macOS on
-# Apple silicon or Intel); elsewhere set ORT_DYLIB_PATH, or put the library beside the
-# executable.
+# fetches the build that scripts/onnxruntime.tsv pins for this system: Linux x64, macOS on
+# Apple silicon or Intel, and Windows x64 under Git Bash, where scripts/win.ps1 fetches the
+# same build. On a system with no pinned build, set ORT_DYLIB_PATH, or put the library
+# beside the executable.
 # A developer's own ORT_DYLIB_PATH is kept (empty counts as unset). Without one, it is the
 # library of `just ort`, whether installed yet or not, and nothing on a system with no
 # pinned build. `scripts/ort.sh --where` only names the path: it downloads nothing.
@@ -78,7 +79,7 @@ ps-samples *ARGS:
 calibrate-ml *ARGS:
     cargo run --release -p photostacker-core --example calibrate_ml -- "$@"
 
-# scripts/ort.sh extracts it into a temporary folder and renames it into place whole, so an interrupted run leaves nothing that looks installed.
+# scripts/ort.sh downloads the archive into a temporary folder, checks its SHA-256, unpacks it there, and then renames the build's folder into place whole, so an interrupted run leaves nothing that looks installed.
 # Download Microsoft's ONNX Runtime for this system once into the user's cache folder, verified, and print its library's path; a no-op when it is there.
 ort:
     @scripts/ort.sh
