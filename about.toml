@@ -420,11 +420,11 @@ license = "Apache-2.0"
 checksum = "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
 
 # egui (github.com/emilk/egui): LICENSE-MIT and LICENSE-APACHE at the root.
-# eframe 0.37.0 was published from a commit the repository has. The other
-# crates of 0.37.0 name, in their .cargo_vcs_info.json, a commit the
-# repository does not have, so they read the files at the commit the 0.37.0
-# tag points at (the release commit), which holds the same two licence files
-# as eframe's own commit.
+# eframe 0.37.0 and egui_system_font_provider 0.37.0 were published from a
+# commit the repository has. The other crates of 0.37.0 name, in their
+# .cargo_vcs_info.json, a commit the repository does not have, so they read
+# the files at the commit the 0.37.0 tag points at (the release commit), which
+# holds the same two licence files as eframe's own commit.
 
 [eframe.clarify]
 license = "MIT OR Apache-2.0"
@@ -435,6 +435,19 @@ license = "MIT"
 checksum = "95ca92f5f8ea5231f1580b3a2a799e8260af3114b900e1def5355a7f44bcf60c"
 
 [[eframe.clarify.git]]
+path = "LICENSE-APACHE"
+license = "Apache-2.0"
+checksum = "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90"
+
+[egui_system_font_provider.clarify]
+license = "MIT OR Apache-2.0"
+
+[[egui_system_font_provider.clarify.git]]
+path = "LICENSE-MIT"
+license = "MIT"
+checksum = "95ca92f5f8ea5231f1580b3a2a799e8260af3114b900e1def5355a7f44bcf60c"
+
+[[egui_system_font_provider.clarify.git]]
 path = "LICENSE-APACHE"
 license = "Apache-2.0"
 checksum = "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90"
@@ -586,7 +599,7 @@ path = "LICENSE.txt"
 license = "MIT"
 checksum = "e353f37b12aefbb9f9b29490e837cfee05d9bda70804b3562839a3285c1df1e5"
 
-# The seven objc2 crates built in at one version only were published when
+# The eight objc2 crates built in at one version only were published when
 # the repository's root held only LICENSE.md. The repository gained its
 # licence texts later, in the commit "Include license text in the
 # repository" (LICENSE-MIT.txt, LICENSE-APACHE.txt, LICENSE-ZLIB.txt,
@@ -645,6 +658,25 @@ license = "Apache-2.0"
 checksum = "0c9a5f6fe28e27015e12506ffe58c9e007cead169af9670ec15c1df0d14e4f2a"
 
 [[objc2-core-graphics.clarify.git]]
+path = "LICENSE-ZLIB.txt"
+license = "Zlib"
+checksum = "fced3e7fedc235fa83ed0108b0df74d86b435d06436356f46917a903cbadd80a"
+
+[objc2-core-text.clarify]
+license = "Zlib OR Apache-2.0 OR MIT"
+override-git-commit = "ee9a7ada2131f5944b8750428e265c15632f2a19"
+
+[[objc2-core-text.clarify.git]]
+path = "LICENSE-MIT.txt"
+license = "MIT"
+checksum = "f6a2e783669a0dd7a2c3b8a4f76db40ae49033e66e1bdc30f3aa25fe5577b070"
+
+[[objc2-core-text.clarify.git]]
+path = "LICENSE-APACHE.txt"
+license = "Apache-2.0"
+checksum = "0c9a5f6fe28e27015e12506ffe58c9e007cead169af9670ec15c1df0d14e4f2a"
+
+[[objc2-core-text.clarify.git]]
 path = "LICENSE-ZLIB.txt"
 license = "Zlib"
 checksum = "fced3e7fedc235fa83ed0108b0df74d86b435d06436356f46917a903cbadd80a"

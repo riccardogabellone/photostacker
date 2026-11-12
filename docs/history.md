@@ -172,6 +172,6 @@ The Python app stayed in the tree as the parity reference for hashing and groupi
 - The time window's range ends at 60 s; one trial folder still gained stacks at 45 and 60 s, and the Python app allowed 600 s.
 - On partly transparent stacks the merged image is the top layer alone, where Photoshop's composite would also show the layers below.
 - The bracketing path of the MakerNote parser has been checked on public bracket sets, not yet on the owner's own camera files.
-- Names in scripts the Inter font does not cover (CJK, Arabic, Hebrew, Thai) show missing glyphs.
+- Names in scripts the Inter font does not cover (CJK, Arabic, Hebrew, Thai) are drawn with the system's fonts, and as empty boxes where the system has no font for their script. A right-to-left name of several words shows its words in the wrong order.
 
 The rules for working in the repository are in [../AGENTS.md](../AGENTS.md).

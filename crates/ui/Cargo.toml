@@ -29,7 +29,10 @@ ml = ["photostacker-core/ml"]
 crossbeam-channel.workspace = true
 # `clipboard`: the system clipboard (arboard, and smithay-clipboard on Wayland), so a path
 # copied in another program pastes into a field, and the About card's addresses copy out.
-eframe = { workspace = true, features = ["accesskit", "clipboard", "default_fonts", "wayland", "x11"] }
+# `system_fonts`: a character none of the app's fonts has (Chinese, Japanese, Korean,
+# Arabic, Hebrew, Thai…) is drawn with a font installed on the system, found when it is
+# first drawn, behind Inter and egui's own fonts (crates/ui/DESIGN.md, Typography).
+eframe = { workspace = true, features = ["accesskit", "clipboard", "default_fonts", "system_fonts", "wayland", "x11"] }
 egui-notify.workspace = true
 egui_material_icons.workspace = true
 # Decodes the review thumbnails, which the engine writes as JPEGs, on the loader thread.

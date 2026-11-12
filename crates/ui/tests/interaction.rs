@@ -4474,13 +4474,18 @@ fn every_screen_renders_in_both_themes_at_the_smallest_window() {
         }
         let (_data, _prepared, (open, controller), waker) =
             screens::start(screen).unwrap_or_else(|error| panic!("{error}"));
-        let mut harness = Harness::builder()
-            .with_size(size)
-            .build_eframe(move |creation| {
-                waker.attach(&creation.egui_ctx);
-                let app = (screen.setup)(&creation.egui_ctx, controller);
-                Shown { _open: open, app }
-            });
+        let mut builder = Harness::builder().with_size(size);
+        // Its names are in scripts the app's fonts lack. The window takes them from the
+        // system's fonts; the harness looks for none, so its layout is the same on every
+        // machine, and draws boxes instead.
+        if screen.name == "names" {
+            builder = builder.allow_missing_glyphs();
+        }
+        let mut harness = builder.build_eframe(move |creation| {
+            waker.attach(&creation.egui_ctx);
+            let app = (screen.setup)(&creation.egui_ctx, controller);
+            Shown { _open: open, app }
+        });
         for theme in [egui::Theme::Dark, egui::Theme::Light] {
             harness.ctx.set_theme(theme);
             for _ in 0..FRAMES {

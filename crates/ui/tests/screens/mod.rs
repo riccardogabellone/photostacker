@@ -270,6 +270,13 @@ pub const SCREENS: &[Screen] = &[
         prepare: no_stacks,
         setup: app,
     },
+    // A job in review on a folder named in Japanese, its one stack selected: a bracket of
+    // eight photos named in eight languages, most of them in scripts Inter does not have.
+    Screen {
+        name: "names",
+        prepare: named_in_other_scripts,
+        setup: inspecting_the_named_stack,
+    },
     // The `jobs` screen with Settings open, the defaults of new jobs changed.
     Screen {
         name: "settings",
@@ -834,6 +841,60 @@ fn no_stacks(_dirs: &AppDirs) -> Result<Prepared, String> {
         inspect: Some(folder),
         ..Prepared::default()
     })
+}
+
+/// The `names` screen's folder: "summer holidays" in Japanese.
+const NAMES_FOLDER: &str = "夏休み";
+/// The `names` screen's photos, top layer first: "sunset" in Simplified and Traditional
+/// Chinese, Korean, French, Arabic (two words), Hebrew, Thai and Russian. Inter has the
+/// letters of the French one, with its accent, and of the Russian one, and none of the
+/// others'. The French one is at 0 EV, so its layer name alone has no exposure after it.
+const NAMES: [&str; 8] = [
+    "夕阳",
+    "夕陽",
+    "일몰",
+    "Crépuscule",
+    "غروب الشمس",
+    "שקיעה",
+    "พระอาทิตย์ตก",
+    "Закат",
+];
+
+/// The `names` screen's folder: a bracket of eight JPEGs half an EV apart, with a Canon's
+/// exposure, named [`NAMES`].
+fn named_in_other_scripts(_dirs: &AppDirs) -> Result<Prepared, String> {
+    let root = photos_root()?;
+    let folder = root.path().join(NAMES_FOLDER);
+    fs::create_dir(&folder).map_err(|error| format!("{}: {error}", folder.display()))?;
+    let base = scene(5, WIDTH, HEIGHT);
+    for (shot, name) in (1..).zip(NAMES) {
+        // In half EVs: −1.5 to +2.
+        let half_evs = i32::from(shot) - 4;
+        let mut exif = canon_exposure_exif(u32::from(shot) - 1, shot);
+        exif.exif
+            .push((0x9204, Value::SRational(vec![(half_evs, 2)])));
+        let image = expose(&base, half_evs as f32 / 2.0);
+        let path = folder.join(format!("{name}.jpg"));
+        fs::write(&path, jpeg_with_exif(&image, &exif.build(), JPEG_QUALITY))
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+    }
+    Ok(Prepared {
+        _folders: vec![root],
+        inspect: Some(folder),
+        ..Prepared::default()
+    })
+}
+
+/// The app with the `names` screen's stack selected.
+fn inspecting_the_named_stack(
+    context: &egui::Context,
+    mut controller: Controller,
+) -> Box<dyn Screened> {
+    match stack_of(&controller, &format!("{}.jpg", NAMES[0])) {
+        Ok(stack) => controller.select_group(stack, false),
+        Err(error) => eprintln!("{error}"),
+    }
+    Box::new(App::new(context, controller))
 }
 
 /// The app with the JPEG bracket's stack selected, its second and third photos checked.
