@@ -122,7 +122,7 @@ cargo build --release --locked -p photostacker-ui -p photostacker-cli
 # package too.
 if [ "$os" = linux ]; then
     scripts/libde265-built-in.sh "$release/Photostacker" "$release/photostacker-cli" ||
-        fail "the packages would not carry the pinned libde265 (the line above says why); nothing was packaged"
+        fail "libde265 is not shown to be built into the executables (the line above says why); nothing was packaged"
 fi
 
 # The version in the packages' names, as the built tool states it.

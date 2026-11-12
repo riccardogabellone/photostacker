@@ -166,7 +166,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           if ! scripts/libde265-built-in.sh target/release/Photostacker target/release/photostacker-cli; then
-            echo "::error::an executable needs the system's shared libde265, not the pinned one (the line above names it): look at the build inputs' step \"libde265 (Linux)\", which builds the pinned one and sets CMAKE_PREFIX_PATH and PKG_CONFIG_PATH"
+            echo "::error::libde265 is not shown to be built into the executables (the line above says why); where one needs the system's shared libde265, look at the build inputs' step \"libde265 (Linux)\", which builds the pinned one and sets CMAKE_PREFIX_PATH and PKG_CONFIG_PATH"
             exit 1
           fi
 
