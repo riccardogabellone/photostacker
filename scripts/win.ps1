@@ -1,9 +1,10 @@
 #Requires -Version 7
-# Builds the desktop app and the command-line tool natively on Windows, runs the tests there,
-# or saves a screen of the app:
+# Builds the desktop app and the command-line tool natively on Windows, runs the tests or the
+# lints there, or saves a screen of the app:
 #
 #   pwsh scripts/win.ps1                         # build both into <repo>\dist\windows
 #   pwsh scripts/win.ps1 -Test [nextest arguments]
+#   pwsh scripts/win.ps1 -Clippy [cargo clippy arguments]
 #   pwsh scripts/win.ps1 -Screenshot <out.png> <screen> [dark|light] [width] [height]
 #
 # Plain, it builds `Photostacker.exe` and `photostacker-cli.exe` in release mode with the MSVC
@@ -18,9 +19,13 @@
 # -Test runs `cargo nextest run --workspace --locked` with the arguments that follow it (as in
 # `pwsh scripts/win.ps1 -Test -E 'test(heic)'`), with ONNX Runtime's library in
 # ORT_DYLIB_PATH, so the tests that run a model run. It needs cargo-nextest:
-# `cargo +stable-x86_64-pc-windows-msvc install cargo-nextest --locked`. -Screenshot runs the
-# screenshot example (`just screenshot` elsewhere); a relative <out.png> is taken from the
-# repository's folder, as `just` takes it. Neither touches dist\windows.
+# `cargo +stable-x86_64-pc-windows-msvc install cargo-nextest --locked`. -Clippy runs
+# `cargo clippy --workspace --all-targets --locked -- -D warnings`, the CI's lints, with the
+# arguments that follow it before the `--` (as in `pwsh scripts/win.ps1 -Clippy
+# --no-default-features`): the code behind `cfg(windows)` is linted only on Windows.
+# -Screenshot runs the screenshot example (`just screenshot` elsewhere); a relative <out.png>
+# is taken from the repository's folder, as `just` takes it. None of the three touches
+# dist\windows.
 #
 # HEIC: with the MSVC toolchain, libheif-sys takes libheif and libde265 from vcpkg. The
 # script first runs scripts\windows-heif.ps1, which keeps a vcpkg checkout at a pinned commit
@@ -47,11 +52,13 @@
 # Before anything else it checks what would otherwise fail late: that neither executable is
 # running from dist\windows (a locked executable would stop the copy half-way), that the
 # MSVC toolchain is installed (so rustup never installs one on its own), that the Windows
-# SDK is there, and for -Test that cargo-nextest is.
+# SDK is there, for -Test that cargo-nextest is, and for -Clippy that clippy is.
 
 param(
     # Run the tests instead of building; the arguments after it go to nextest.
     [switch] $Test,
+    # Run the lints instead of building; the arguments after it go to cargo clippy.
+    [switch] $Clippy,
     # Save a screen of the app instead of building; the arguments after it go to the example.
     [switch] $Screenshot
 )
@@ -104,11 +111,14 @@ $SdkRemedy = 'Install the Visual Studio Build Tools'' "Desktop development with 
 
 # Stops unless the arguments fit the switches: at most one switch, and arguments only after one.
 function Assert-Arguments([object[]] $arguments) {
-    if ($Test -and $Screenshot) {
-        throw 'Pass -Test or -Screenshot, not both.'
+    if (([int] $Test.IsPresent + [int] $Clippy.IsPresent + [int] $Screenshot.IsPresent) -gt 1) {
+        throw 'Pass one of -Test, -Clippy and -Screenshot, not more.'
     }
-    if (-not ($Test -or $Screenshot) -and $arguments.Count -gt 0) {
-        throw "Arguments go after -Test or -Screenshot; a build takes none (got: $arguments)."
+    if (-not ($Test -or $Clippy -or $Screenshot) -and $arguments.Count -gt 0) {
+        throw "Arguments go after -Test, -Clippy or -Screenshot; a build takes none (got: $arguments)."
+    }
+    if ($Clippy -and $arguments -contains '--') {
+        throw 'The arguments of -Clippy go to cargo clippy, before the -- -D warnings the script adds: pass no -- of your own.'
     }
     if ($Screenshot -and $arguments.Count -lt 2) {
         throw 'Usage: pwsh scripts/win.ps1 -Screenshot <out.png> <screen> [dark|light] [width] [height]'
@@ -175,6 +185,17 @@ function Assert-WindowsSdk {
 function Assert-Nextest {
     if (-not (Get-Command cargo-nextest -ErrorAction SilentlyContinue)) {
         throw "cargo-nextest is not installed: run ``cargo +$Toolchain install cargo-nextest --locked``, then run this script again."
+    }
+}
+
+# Stops unless the MSVC toolchain has clippy, a component rustup installs on request only.
+function Assert-Clippy {
+    $components = rustup component list --installed --toolchain $Toolchain
+    if ($LASTEXITCODE -ne 0) {
+        throw "rustup cannot list the components of $Toolchain."
+    }
+    if (-not ($components | Where-Object { $_ -like 'clippy*' })) {
+        throw "clippy is not installed for $Toolchain`: run ``rustup component add clippy --toolchain $Toolchain``, then run this script again."
     }
 }
 
@@ -295,7 +316,7 @@ function Copy-ToDist {
 # failed download or a wrong digest stops the script in seconds, not after a build of many
 # minutes.
 Assert-Arguments $args
-if (-not ($Test -or $Screenshot)) {
+if (-not ($Test -or $Clippy -or $Screenshot)) {
     Assert-NotRunning
 }
 Assert-Toolchain
@@ -303,11 +324,17 @@ Assert-WindowsSdk
 if ($Test) {
     Assert-Nextest
 }
+if ($Clippy) {
+    Assert-Clippy
+}
 Install-OnnxRuntime
 $vcpkgRoot = Install-Heif
 
 if ($Test) {
     exit (Invoke-Cargo $vcpkgRoot (@('nextest', 'run', '--workspace', '--locked') + $args))
+}
+if ($Clippy) {
+    exit (Invoke-Cargo $vcpkgRoot (@('clippy', '--workspace', '--all-targets', '--locked') + $args + @('--', '-D', 'warnings')))
 }
 if ($Screenshot) {
     exit (Invoke-Cargo $vcpkgRoot (@('run', '--release', '--locked', '-p', 'photostacker-ui', '--example', 'screenshot', '--') + $args))
