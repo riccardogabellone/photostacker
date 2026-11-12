@@ -15,7 +15,7 @@ It is a desktop app and a command-line tool. It works offline, only reads your p
 Photostacker is at version 0.1.0. There is no release yet, so for now it is built from source.
 
 - The tests pass on Linux, on Windows and on macOS (Apple silicon and Intel).
-- The packages for the three systems are built and checked by the project's workflows: their contents, what they link, and a run of the command-line tool from each. No person has installed and started the Windows and macOS packages yet, and on macOS the app itself has not been opened yet: only its tests and the command-line tool have run there.
+- The packages for the three systems are built and checked by the project's workflows: their contents, what they link, and a run of the command-line tool from each. The Linux and Windows packages have also been tried by hand. No person has installed and started the macOS packages yet, and on macOS the app itself has not been opened yet: only its tests and the command-line tool have run there.
 - Photoshop itself has not opened the files yet. Three other programs have (GIMP, PhotoCraft and Photopea): see [docs/photoshop-checks.md](docs/photoshop-checks.md).
 - Names in scripts other than Latin, Greek and Cyrillic (Chinese, Japanese, Korean, Arabic, Hebrew, Thai) are drawn with your system's fonts, which may look lighter or smaller than the text around them, and as empty boxes where the system has no font for their script. Arabic and Hebrew words read correctly, but a name of several words, or one with digits or Latin letters inside it, shows its parts in the wrong order.
 
