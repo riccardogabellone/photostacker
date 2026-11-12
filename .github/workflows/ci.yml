@@ -158,6 +158,15 @@ jobs:
       # The tests run in the test profile; this builds the executables users get.
       - name: Release build
         run: cargo build --release --locked -p photostacker-ui -p photostacker-cli
+      # The executables have the pinned libde265 built in, as the packages must (spec §11.1);
+      # the release workflow's scripts/package.sh makes the same check.
+      - name: libde265 is built in (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          if ! scripts/libde265-built-in.sh target/release/Photostacker target/release/photostacker-cli; then
+            echo "::error::an executable needs the system's shared libde265, not the pinned one (the line above names it): look at the build inputs' step \"libde265 (Linux)\", which builds the pinned one and sets CMAKE_PREFIX_PATH and PKG_CONFIG_PATH"
+            exit 1
+          fi
 
       # libde265.sh checks libde265's objects; this checks libheif's, which cmake built
       # through libheif-sys (scripts/macos-min.sh says why).

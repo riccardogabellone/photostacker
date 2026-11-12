@@ -55,7 +55,7 @@ On Linux and macOS, build libde265 with `scripts/libde265.sh <prefix>` first, an
 
 The script:
 
-1. builds both executables (`cargo build --release --locked`), into `CARGO_TARGET_DIR` when it is set, else into `target/`, and on Linux checks that neither needs a shared libde265 (`objdump -p`);
+1. builds both executables (`cargo build --release --locked`), into `CARGO_TARGET_DIR` when it is set, else into `target/`, and on Linux checks that neither needs a shared libde265 (`scripts/libde265-built-in.sh`);
 2. stages in `dist/package` what the packages carry besides the executables: the `licenses` folder (`THIRD-PARTY-LICENSES.md` made by `scripts/licences.sh`, the script `just licences` runs), ONNX Runtime's library under its plain name, and on Windows the Visual C++ runtime DLLs that the files name;
 3. runs `cargo packager` from `crates/ui`, which copies everything in `dist/package/resources` into the package's resource folder at the same paths, and on macOS `dist/package/frameworks/libonnxruntime.dylib` into `Contents/Frameworks`;
 4. on Windows, zips the app's folder with PowerShell's `Compress-Archive`.

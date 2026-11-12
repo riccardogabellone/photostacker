@@ -6,10 +6,11 @@
 #   scripts/package.sh dmg            macOS
 #
 # 1. Builds the desktop app and photostacker-cli (release, default features). On Linux it
-#    then stops unless libde265 is built into both (objdump -p): build the pinned one with
-#    scripts/libde265.sh <prefix>, and set CMAKE_PREFIX_PATH and PKG_CONFIG_PATH, first
-#    (AGENTS.md). Without them the build links the system's libde265-dev, if there is one,
-#    as a shared library: right for development, wrong for a package.
+#    then stops unless libde265 is built into both (scripts/libde265-built-in.sh): build the
+#    pinned one with scripts/libde265.sh <prefix>, and set CMAKE_PREFIX_PATH and
+#    PKG_CONFIG_PATH, first (AGENTS.md). Without them the build links the system's
+#    libde265-dev, if there is one, as a shared library: right for development, wrong for a
+#    package.
 # 2. Stages in dist/package what a package carries besides the two executables:
 #    resources/licenses/ (the eight files of spec §11.3); on Linux and Windows ONNX Runtime's
 #    library in resources/, and on Windows beside it every Visual C++ runtime DLL that the
@@ -117,21 +118,11 @@ echo "Building Photostacker and photostacker-cli into $target_dir" >&2
 cargo build --release --locked -p photostacker-ui -p photostacker-cli
 
 # Linux: libde265 must be built into both executables, as on the other systems. One that
-# names a libde265 among the libraries it needs (NEEDED) was linked against the system's
-# shared library; scripts/smoke.sh fails such a package too.
+# needs a shared libde265 was linked against the system's; scripts/smoke.sh fails such a
+# package too.
 if [ "$os" = linux ]; then
-    command -v objdump >/dev/null 2>&1 ||
-        fail "objdump (binutils) is not on the PATH, and it checks that libde265 is built into the executables"
-    for name in Photostacker photostacker-cli; do
-        needed=$(objdump -p "$release/$name" | awk '$1 == "NEEDED" { print $2 }') ||
-            fail "objdump could not read $release/$name"
-        for lib in $needed; do
-            case "$lib" in
-                libde265.so*) fail "$name needs $lib, the system's shared libde265, so the packages would not carry the pinned one: build it with scripts/libde265.sh <prefix>, set CMAKE_PREFIX_PATH=<prefix> and PKG_CONFIG_PATH=<prefix>/lib/pkgconfig, run cargo clean --release -p libheif-sys, and run this script again" ;;
-            esac
-        done
-    done
-    echo "libde265 is built into both executables" >&2
+    scripts/libde265-built-in.sh "$release/Photostacker" "$release/photostacker-cli" ||
+        fail "the packages would not carry the pinned libde265 (the line above says why); nothing was packaged"
 fi
 
 # The version in the packages' names, as the built tool states it.
