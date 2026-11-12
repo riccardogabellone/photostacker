@@ -102,11 +102,12 @@ jobs:
           path: ${{ env.PHOTOSTACKER_MODELS_DIR }}
           # The registry pins the model's address and SHA-256.
           key: dinov2-small-${{ runner.os }}-${{ hashFiles('crates/core/src/models/registry.rs') }}
+      # In release, as the job's last step builds: that step then reuses most of this build.
       - name: Download the model
         if: steps.model.outputs.cache-hit != 'true'
         env:
           PHOTOSTACKER_DATA_DIR: ${{ runner.temp }}/photostacker-data
-        run: cargo run --locked -p photostacker-cli -- models download dinov2-small
+        run: cargo run --release --locked -p photostacker-cli -- models download dinov2-small
 
       # A test that finds no ONNX Runtime, no model or fewer than three cores passes with a
       # "skipped:" line; here that is a failure instead.
