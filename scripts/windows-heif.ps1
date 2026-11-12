@@ -16,8 +16,9 @@
 # codec, as on the other systems (spec §3).
 #
 # The root is a folder of the script's own: one that does not exist yet, an empty one, or
-# one this script made before, which it marks with the file `.git\photostacker-vcpkg`. Any
-# other folder (someone's own vcpkg, a folder of files) is refused untouched: the script
+# one this script made before, which it marks with the file `.git\photostacker-vcpkg` before
+# anything else (a folder holding only a `.git` with no commit and no remote, what a run
+# stopped before the mark leaves, is taken back too). Any other folder (someone's own vcpkg, a folder of files) is refused untouched: the script
 # rewrites its checkout by force and deletes what vcpkg installed there.
 #
 # The first run needs git and the network: it fetches the pinned commit (that commit only,
@@ -64,7 +65,7 @@ $Vcpkg = Join-Path $Root 'vcpkg.exe'
 # The file that marks a root as this script's: inside .git, so no checkout touches it.
 $Mark = Join-Path $Root '.git\photostacker-vcpkg'
 # What to do when the root this script made is in a state it cannot mend.
-$Remedy = "delete the folder $Root, which this script made, then run this script again."
+$Remedy = "delete the folder $Root (it holds only what this script put there), then run this script again."
 
 # Stops when $Root is the repository or inside it: vcpkg writes gigabytes under its root.
 function Assert-OutsideRepository {
@@ -75,8 +76,23 @@ function Assert-OutsideRepository {
     }
 }
 
-# Stops unless $Root is this script's to use: missing, an empty folder, or marked as made by
-# it. Nothing in a refused folder is touched.
+# True when $Root holds nothing but a `.git` folder with no commit and no remote: what a
+# run stopped between making the folder and marking it leaves (an empty `.git`, or
+# `git init`'s bare result). Nothing in it is anyone's work.
+function Test-InterruptedStart {
+    $entries = @(Get-ChildItem -LiteralPath $Root -Force)
+    if ($entries.Count -ne 1 -or $entries[0].Name -ne '.git' -or -not $entries[0].PSIsContainer) {
+        return $false
+    }
+    git -C $Root rev-parse --verify --quiet HEAD 2>$null | Out-Null
+    $hasCommit = $LASTEXITCODE -eq 0
+    $remotes = @(git -C $Root remote 2>$null)
+    return -not $hasCommit -and $remotes.Count -eq 0
+}
+
+# Stops unless $Root is this script's to use: missing, an empty folder, marked as made by it,
+# or left so by a run of it that stopped before the mark. Nothing in a refused folder is
+# touched.
 function Assert-OwnRoot {
     if (-not (Test-Path -LiteralPath $Root)) {
         return
@@ -85,6 +101,9 @@ function Assert-OwnRoot {
         throw "$Root is a file, not a folder: pass -Root with a folder that does not exist yet, or an empty one."
     }
     if (Test-Path -LiteralPath $Mark -PathType Leaf) {
+        return
+    }
+    if (Test-InterruptedStart) {
         return
     }
     if (Get-ChildItem -LiteralPath $Root -Force | Select-Object -First 1) {
@@ -219,11 +238,19 @@ function Update-Checkout {
     if ($current -ne $VcpkgCommit) {
         Write-Host "Fetching vcpkg $VcpkgCommit into $Root"
         New-Item -ItemType Directory -Force -Path $Root | Out-Null
+        # The mark comes first, so a run that stops from here on leaves a marked root (or
+        # only an empty .git, which Assert-OwnRoot takes back too). Then a repository and
+        # the remote: `git init` keeps what is there, so each run can mend a stopped one.
         if (-not (Test-Path -LiteralPath $Mark -PathType Leaf)) {
-            # Missing or empty (Assert-OwnRoot): a new repository, marked as this script's.
-            Invoke-Git 'make a repository' @('init', '--quiet')
-            Set-Content -LiteralPath $Mark -Value 'A vcpkg checkout of scripts/windows-heif.ps1 (Photostacker).'
+            New-Item -ItemType File -Force -Path $Mark -Value 'A vcpkg checkout of scripts/windows-heif.ps1 (Photostacker).' | Out-Null
+        }
+        Invoke-Git 'make a repository' @('init', '--quiet')
+        $origin = git -C $Root remote get-url origin 2>$null
+        if ($LASTEXITCODE -ne 0) {
             Invoke-Git 'add the vcpkg remote' @('remote', 'add', 'origin', $VcpkgUrl)
+        }
+        elseif ($origin -ne $VcpkgUrl) {
+            Invoke-Git 'set the vcpkg remote' @('remote', 'set-url', 'origin', $VcpkgUrl)
         }
         Invoke-Git "fetch vcpkg's commit $VcpkgCommit" @('fetch', '--depth', '1', 'origin', $VcpkgCommit)
         Invoke-Git "check out vcpkg's commit $VcpkgCommit" @('-c', 'advice.detachedHead=false', 'checkout', '--force', 'FETCH_HEAD')
@@ -241,8 +268,8 @@ function Update-Checkout {
 }
 
 Assert-OutsideRepository
-Assert-OwnRoot
 Assert-Git
+Assert-OwnRoot
 
 if (Update-Checkout) {
     # Built from another commit's ports: build them again from this pin's.
